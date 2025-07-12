@@ -5,6 +5,7 @@ ENT.Base = "base_gmodentity"
 ENT.PrintName = "Action Playback Box"
 ENT.Category = "Utility"
 ENT.Spawnable = true
+ENT.SoundPath = "buttons/button1.wav"
 
 function ENT:Initialize()
     self:SetSolid(SOLID_VPHYSICS)
@@ -14,7 +15,8 @@ function ENT:Initialize()
     self.PlaybackData = {}
     self.PlaybackTimers = {}
     self.PlaybackSpeed = 1
-    self.ShouldLoop = false
+    self.LoopMode = 0
+    self.PlaybackDirection = 1
     self.PlaybackType = "absolute"
     self.PlaybackCounter = 0
     self.IsPlayingBack = false
@@ -65,9 +67,9 @@ function ENT:SetPlaybackData(data)
     self.PlaybackData = data or {}
 end
 
-function ENT:SetPlaybackSettings(speed, loop, playbackType)
+function ENT:SetPlaybackSettings(speed, loopMode, playbackType)
     self.PlaybackSpeed = speed or 1
-    self.ShouldLoop = loop or false
+    self.LoopMode = loopMode or 0
     self.PlaybackType = playbackType or "absolute"
 end
 
@@ -80,16 +82,21 @@ function ENT:SetOwnerName(name)
     if SERVER then self:SetNWString("OwnerName", name or "Unknown") end
 end
 
-function ENT:UpdateSettings(speed, loop, playbackType, model, boxid)
-    self:SetPlaybackSettings(speed, loop, playbackType)
+function ENT:SetSoundPath(soundpath)
+    self.SoundPath = soundpath
+end
+
+function ENT:UpdateSettings(speed, loopMode, playbackType, model, boxid, soundpath)
+    self:SetPlaybackSettings(speed, loopMode, playbackType)
     self:SetModelPath(model)
     self:SetBoxID(boxid)
+    self:SetSoundPath(soundpath)
     self:StartPlayback()
 end
 
 function ENT:Use(activator, caller)
     if not self.PlaybackData then return end
-    self:EmitSound("buttons/button3.wav")
+    self:EmitSound(self.SoundPath or "buttons/button3.wav")
     self:StartPlayback()
 end
 
@@ -114,6 +121,7 @@ function ENT:StartPlayback()
     self.PlaybackTimers = {}
     self.PlaybackCounter = (self.PlaybackCounter or 0) + 1
     self.IsPlayingBack = true
+    self.PlaybackDirection = 1
 
     for entIndex, frames in pairs(self.PlaybackData or {}) do
         local ent = Entity(entIndex)
@@ -168,11 +176,16 @@ function ENT:StartPlayback()
 
             local frame = frames[i]
             if not frame then
-                if self.ShouldLoop then
+                if self.LoopMode == 1 then -- Loop
                     i = (self.PlaybackSpeed < 0) and frameCount or 1
                     frame = frames[i]
                     basePos = (self.PlaybackType == "relative") and (ent:GetPos() - frame.pos) or Vector(0,0,0)
-                else
+                elseif self.LoopMode == 2 then -- Ping-Pong
+                    self.PlaybackDirection = self.PlaybackDirection * -1
+                    i = i + (self.PlaybackDirection * (self.PlaybackSpeed < 0 and -1 or 1) * 2)
+                    frame = frames[i]
+                    basePos = (self.PlaybackType == "relative") and (ent:GetPos() - frame.pos) or Vector(0,0,0)
+                else -- No Loop
                     timer.Remove(timerName)
                     if self.PlaybackTimers then self.PlaybackTimers[entIndex] = nil end
                     ent.IsBeingPlayedBack = false
@@ -221,7 +234,7 @@ function ENT:StartPlayback()
             ent.LastFrameTime = CurTime()
             ent.NextFrameTime = CurTime() + math.abs(0.02 / (self.PlaybackSpeed or 1))
 
-            i = i + (self.PlaybackSpeed < 0 and -1 or 1)
+            i = i + (self.PlaybackDirection * (self.PlaybackSpeed < 0 and -1 or 1))
         end)
     end
 end
@@ -276,7 +289,7 @@ if SERVER then
     numpad.Register("ActionRecorder_Playback", function(ply, ent)
         if not IsValid(ent) then return end
         if ent:GetNWString("OwnerName", "") ~= ply:Nick() then return end
-        ent:EmitSound("buttons/button3.wav")
+        ent:EmitSound(ent.SoundPath or "buttons/button3.wav")
         ent:StartPlayback()
     end)
 end

@@ -13,7 +13,8 @@ if SERVER then
     CreateConVar("actionrecorder_playbacktype", "absolute", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
     CreateConVar("actionrecorder_model", "models/dav0r/camera.mdl", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
     CreateConVar("actionrecorder_boxid", "Box", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
-    CreateConVar("actionrecorder_globalmode", "0", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
+    CreateConVar("actionrecorder_globalmode", "1", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
+    CreateConVar("actionrecorder_soundpath", "buttons/button1.wav", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
 else
     CreateClientConVar("actionrecorder_playbackspeed", "1", true, true)
     CreateClientConVar("actionrecorder_loop", "0", true, true)
@@ -22,6 +23,7 @@ else
     CreateClientConVar("actionrecorder_boxid", "Box", true, true)
     CreateClientConVar("actionrecorder_globalmode", "0", true, true)
     CreateClientConVar("actionrecorder_key", "", true, true)
+    CreateClientConVar("actionrecorder_soundpath", "buttons/button1.wav", true, true)
 end
 
 local function vectorsDifferent(a, b)
@@ -178,29 +180,31 @@ function TOOL:RightClick(trace)
     if CLIENT then return true end
     local ply = self:GetOwner()
     local globalMode = GetConVar("actionrecorder_globalmode"):GetBool()
-    local speed, loop, playbackType, model, boxid, key
+    local speed, loop, playbackType, model, boxid, key, soundpath
 
     if globalMode and ply:IsAdmin() then
         speed = tonumber(GetConVar("actionrecorder_playbackspeed"):GetString()) or 1
-        loop = GetConVar("actionrecorder_loop"):GetBool()
+        loop = GetConVar("actionrecorder_loop"):GetInt()
         playbackType = GetConVar("actionrecorder_playbacktype"):GetString() or "absolute"
         model = GetConVar("actionrecorder_model"):GetString() or "models/dav0r/camera.mdl"
         boxid = GetConVar("actionrecorder_boxid"):GetString() or "Box"
         key = GetConVar("actionrecorder_key"):GetInt()
+        soundpath = GetConVar("actionrecorder_soundpath"):GetString()
     else
         speed = ply:GetInfoNum("actionrecorder_playbackspeed", 1)
-        loop = ply:GetInfoNum("actionrecorder_loop", 0) == 1
+        loop = ply:GetInfoNum("actionrecorder_loop", 0)
         playbackType = ply:GetInfo("actionrecorder_playbacktype") or "absolute"
         model = ply:GetInfo("actionrecorder_model") or "models/dav0r/camera.mdl"
         boxid = ply:GetInfo("actionrecorder_boxid") or "Box"
         key = ply:GetInfoNum("actionrecorder_key", 5)
+        soundpath = ply:GetInfo("actionrecorder_soundpath")
     end
 
     local updated = false
     for _, ent in pairs(ents.FindByClass("action_playback_box")) do
         local entBoxID = ent.BoxID or (ent.GetNWString and ent:GetNWString("BoxID", ""))
         if IsValid(ent) and entBoxID == boxid then
-            ent:UpdateSettings(speed, loop, playbackType, model, boxid)
+            ent:UpdateSettings(speed, loop, playbackType, model, boxid, soundpath)
             ent.NumpadKey = key
             if SERVER then ent:SetupNumpad() end
             updated = true
@@ -228,6 +232,7 @@ function TOOL:RightClick(trace)
     ent:SetBoxID(boxid)
     ent:SetOwnerName(ply:Nick() or "Unknown")
     ent.NumpadKey = key
+    ent:SetSoundPath(soundpath)
     if SERVER then ent:SetupNumpad() end
 
     undo.Create("Action Playback Box")
@@ -242,8 +247,12 @@ end
 
 function TOOL.BuildCPanel(panel)
     panel:Help("Playback Speed (negative = reverse)")
-    panel:NumSlider("Playback Speed", "actionrecorder_playbackspeed", -50, 50, 2):SetDecimals(2)
-    panel:CheckBox("Loop Playback", "actionrecorder_loop")
+    panel:NumSlider("Playback Speed", "actionrecorder_playbackspeed", -500, 500, 2):SetDecimals(2)
+    panel:Help("Loop Mode")
+    local loop_combo = panel:ComboBox("Loop Mode", "actionrecorder_loop")
+    loop_combo:AddChoice("No Loop", 0, true)
+    loop_combo:AddChoice("Loop", 1)
+    loop_combo:AddChoice("Ping-Pong", 2)
     panel:Help("Playback Type")
     local combo = panel:ComboBox("Playback Type", "actionrecorder_playbacktype")
     combo:AddChoice("absolute", "absolute", true)
@@ -252,7 +261,8 @@ function TOOL.BuildCPanel(panel)
     panel:TextEntry("Model", "actionrecorder_model")
     panel:Help("Playback Box ID / Name")
     panel:TextEntry("Box ID", "actionrecorder_boxid")
+    panel:Help("Activation Sound")
+    panel:TextEntry("Sound Path", "actionrecorder_soundpath")
     panel:Help("Keybind")
     panel:KeyBinder("Playback Key", "actionrecorder_key")
-    panel:CheckBox("Global Mode (admin only)", "actionrecorder_globalmode")
 end
