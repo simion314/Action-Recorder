@@ -18,6 +18,11 @@ function ENT:Initialize()
     self.LoopMode = 0
     self.PlaybackDirection = 1
     self.PlaybackType = "absolute"
+    self.Easing = "Linear"
+    self.EasingAmplitude = 1
+    self.EasingFrequency = 1
+    self.EasingInvert = false
+    self.EasingOffset = 0
     self.PlaybackCounter = 0
     self.IsPlayingBack = false
     self.BoxID = "Box"
@@ -67,10 +72,15 @@ function ENT:SetPlaybackData(data)
     self.PlaybackData = data or {}
 end
 
-function ENT:SetPlaybackSettings(speed, loopMode, playbackType)
+function ENT:SetPlaybackSettings(speed, loopMode, playbackType, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset)
     self.PlaybackSpeed = speed or 1
     self.LoopMode = loopMode or 0
     self.PlaybackType = playbackType or "absolute"
+    self.Easing = easing or "Linear"
+    self.EasingAmplitude = easing_amplitude or 1
+    self.EasingFrequency = easing_frequency or 1
+    self.EasingInvert = easing_invert or false
+    self.EasingOffset = easing_offset or 0
 end
 
 function ENT:SetBoxID(id)
@@ -86,8 +96,8 @@ function ENT:SetSoundPath(soundpath)
     self.SoundPath = soundpath
 end
 
-function ENT:UpdateSettings(speed, loopMode, playbackType, model, boxid, soundpath)
-    self:SetPlaybackSettings(speed, loopMode, playbackType)
+function ENT:UpdateSettings(speed, loopMode, playbackType, model, boxid, soundpath, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset)
+    self:SetPlaybackSettings(speed, loopMode, playbackType, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset)
     self:SetModelPath(model)
     self:SetBoxID(boxid)
     self:SetSoundPath(soundpath)
@@ -263,6 +273,30 @@ hook.Add("Think", "ActionRecorder_PlaybackThink", function()
             if IsValid(phys) then
                 local alpha = (CurTime() - ent.LastFrameTime) / (ent.NextFrameTime - ent.LastFrameTime)
                 alpha = math.Clamp(alpha, 0, 1)
+                local original_alpha = alpha
+
+                local easing_func = ActionRecorder.EasingFunctions[ent.PlaybackBox.Easing or "Linear"]
+                if easing_func then
+                    local t = alpha
+                    t = t + ent.PlaybackBox.EasingOffset
+                    t = t * ent.PlaybackBox.EasingFrequency
+
+                    local eased_alpha = easing_func(t)
+
+                    if eased_alpha ~= eased_alpha or math.abs(eased_alpha) == math.huge then
+                        eased_alpha = original_alpha
+                    end
+
+                    if ent.PlaybackBox.EasingInvert then
+                        eased_alpha = 1 - eased_alpha
+                    end
+
+                    alpha = Lerp(ent.PlaybackBox.EasingAmplitude, original_alpha, eased_alpha)
+
+                    if alpha ~= alpha or math.abs(alpha) == math.huge then
+                        alpha = eased_alpha
+                    end
+                end
 
                 local interpolatedPos = LerpVector(alpha, ent:GetPos(), ent.TargetPos)
                 local interpolatedAng = LerpAngle(alpha, ent:GetAngles(), ent.TargetAng)
