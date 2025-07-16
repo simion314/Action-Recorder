@@ -290,6 +290,7 @@ function TOOL.BuildCPanel(panel)
 
     local custom_easing_button = panel:Button("Edit Custom Easing", "actionrecorder_edit_custom_easing")
     custom_easing_button:SetSize(150, 20)
+    custom_easing_button:SetImage("icon16/page_white_edit.png")
     custom_easing_button.DoClick = function()
         vgui.Create("ActionRecorderGraphEditor")
     end
@@ -311,4 +312,120 @@ function TOOL.BuildCPanel(panel)
     panel:CheckBox("Invert Easing", "actionrecorder_easing_invert")
     panel:Help("Easing Offset")
     panel:NumSlider("Easing Offset", "actionrecorder_easing_offset", -1, 1, 2)
+end
+
+function TOOL:GetSetConVars(ply)
+    local globalMode = GetConVar("actionrecorder_globalmode"):GetBool()
+    local cvars = {
+        "actionrecorder_playbackspeed",
+        "actionrecorder_loop",
+        "actionrecorder_playbacktype",
+        "actionrecorder_model",
+        "actionrecorder_boxid",
+        "actionrecorder_key",
+        "actionrecorder_soundpath",
+        "actionrecorder_easing",
+        "actionrecorder_easing_amplitude",
+        "actionrecorder_easing_frequency",
+        "actionrecorder_easing_invert",
+        "actionrecorder_easing_offset"
+    }
+
+    local settings = {}
+    for _, cvar in ipairs(cvars) do
+        if globalMode and ply:IsAdmin() then
+            settings[cvar] = GetConVar(cvar):GetString()
+        else
+            settings[cvar] = ply:GetInfo(cvar)
+        end
+    end
+    return settings
+end
+
+function TOOL:ApplyConVars(ply, settings)
+    local globalMode = GetConVar("actionrecorder_globalmode"):GetBool()
+    for cvar, val in pairs(settings) do
+        if globalMode and ply:IsAdmin() then
+            RunConsoleCommand(cvar, val)
+        else
+            ply:SetInfo(cvar, val)
+        end
+    end
+end
+
+function TOOL:Holster()
+    if CLIENT then
+        if IsValid(self.CustomEasingEditor) then
+            self.CustomEasingEditor:Close()
+        end
+    end
+end
+
+local function GetEasingFunction(name)
+    return ActionRecorder.EasingFunctions[name]
+end
+
+if CLIENT then
+    ActionRecorder.EasingFunctions = ActionRecorder.EasingFunctions or {}
+    ActionRecorder.EasingFunctions["Linear"] = function(t, amp, freq, inv, offset) return t end
+    ActionRecorder.EasingFunctions["Sine"] = function(t, amp, freq, inv, offset) return math.sin(t * math.pi * freq + offset) * amp end
+    ActionRecorder.EasingFunctions["Quadratic"] = function(t, amp, freq, inv, offset) return t*t * amp end
+    ActionRecorder.EasingFunctions["Cubic"] = function(t, amp, freq, inv, offset) return t*t*t * amp end
+    ActionRecorder.EasingFunctions["Quartic"] = function(t, amp, freq, inv, offset) return t*t*t*t * amp end
+    ActionRecorder.EasingFunctions["Quintic"] = function(t, amp, freq, inv, offset) return t*t*t*t*t * amp end
+    ActionRecorder.EasingFunctions["Exponential"] = function(t, amp, freq, inv, offset) return math.pow(2, 10 * (t - 1)) * amp end
+    ActionRecorder.EasingFunctions["Circular"] = function(t, amp, freq, inv, offset) return math.sqrt(1 - (t-1)*(t-1)) * amp end
+    ActionRecorder.EasingFunctions["Elastic"] = function(t, amp, freq, inv, offset)
+        if t == 0 or t == 1 then return t end
+        local p = .3
+        local s = p / 4
+        return amp * math.pow(2, -10 * t) * math.sin((t - s) * (2 * math.pi) / p) + 1
+    end
+    ActionRecorder.EasingFunctions["Back"] = function(t, amp, freq, inv, offset)
+        local s = 1.70158
+        return amp * (t*t*((s+1)*t - s))
+    end
+    ActionRecorder.EasingFunctions["Bounce"] = function(t, amp, freq, inv, offset)
+        if t < (1/2.75) then
+            return amp * (7.5625*t*t)
+        elseif t < (2/2.75) then
+            t = t - (1.5/2.75)
+            return amp * (7.5625*t*t + .75)
+        elseif t < (2.5/2.75) then
+            t = t - (2.25/2.75)
+            return amp * (7.5625*t*t + .9375)
+        else
+            t = t - (2.625/2.75)
+            return amp * (7.5625*t*t + .984375)
+        end
+    end
+    ActionRecorder.EasingFunctions["Custom"] = function(t, amp, freq, inv, offset)
+        local points = ActionRecorder.CustomEasingPoints or {{x = 0, y = 0}, {x = 1, y = 1}}
+
+        -- Ensure points are sorted by x (should already be from VGUI, but good to be safe)
+        table.sort(points, function(a, b) return a.x < b.x end)
+
+        -- Handle edge cases for t outside the defined range of points
+        if t <= points[1].x then
+            return points[1].y * amp
+        end
+        if t >= points[#points].x then
+            return points[#points].y * amp
+        end
+
+        local y_val = 0
+        for i = 1, #points - 1 do
+            local p1 = points[i]
+            local p2 = points[i+1]
+
+            if t >= p1.x and t <= p2.x then
+                local range_x = p2.x - p1.x
+                local range_y = p2.y - p1.y
+                local normalized_x = (t - p1.x) / range_x
+                y_val = p1.y + normalized_x * range_y
+                break
+            end
+        end
+        return y_val * amp
+    end
 end
