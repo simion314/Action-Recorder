@@ -25,6 +25,7 @@ function ENT:Initialize()
     self.EasingOffset = 0
     self.PlaybackCounter = 0
     self.IsPlayingBack = false
+    self.LastIsPlayingBack = false
     self.BoxID = "Box"
     self.NumpadKey = self.NumpadKey or 5
 
@@ -34,6 +35,10 @@ function ENT:Initialize()
 
     if SERVER then
         self:SetupNumpad()
+        if WireLib then
+            self.Inputs = WireLib.CreateInputs(self, { "Play", "Stop", "PlaybackSpeed" })
+            self.Outputs = WireLib.CreateOutputs(self, { "IsPlaying" })
+        end
     end
 end
 
@@ -121,6 +126,15 @@ local function IsPropControlledByOtherBox(prop, myBox)
         end
     end
     return false
+end
+
+function ENT:StopPlayback()
+    if not self.PlaybackTimers then return end
+    for _, oldTimerName in pairs(self.PlaybackTimers) do
+        if oldTimerName then timer.Remove(oldTimerName) end
+    end
+    self.PlaybackTimers = {}
+    self.IsPlayingBack = false
 end
 
 function ENT:StartPlayback()
@@ -326,4 +340,26 @@ if SERVER then
         ent:EmitSound(ent.SoundPath or "buttons/button3.wav")
         ent:StartPlayback()
     end)
+    if WireLib then
+        duplicator.RegisterEntityClass("action_playback_box", WireLib.MakeWireEnt, "Data")
+    end
+end
+
+function ENT:TriggerInput(iname, value)
+    if iname == "Play" and value ~= 0 then
+        self:StartPlayback()
+    elseif iname == "Stop" and value ~= 0 then
+        self:StopPlayback()
+    elseif iname == "PlaybackSpeed" then
+        self.PlaybackSpeed = value
+    end
+end
+
+function ENT:Think()
+    if WireLib and self.IsPlayingBack ~= self.LastIsPlayingBack then
+        WireLib.TriggerOutput(self, "IsPlaying", self.IsPlayingBack and 1 or 0)
+        self.LastIsPlayingBack = self.IsPlayingBack
+    end
+    self:NextThink(CurTime())
+    return true
 end
