@@ -36,8 +36,8 @@ function ENT:Initialize()
     if SERVER then
         self:SetupNumpad()
         if WireLib then
-            self.Inputs = WireLib.CreateInputs(self, { "Play", "Stop", "PlaybackSpeed" })
-            self.Outputs = WireLib.CreateOutputs(self, { "IsPlaying" })
+            self.Inputs = WireLib.CreateInputs(self, { "Play", "Stop", "PlaybackSpeed", "LoopMode" })
+            self.Outputs = WireLib.CreateOutputs(self, { "IsPlaying", "PlaybackSpeed", "Frame" })
         end
     end
 end
@@ -129,6 +129,7 @@ local function IsPropControlledByOtherBox(prop, myBox)
 end
 
 function ENT:StopPlayback()
+    if not self.IsPlayingBack then return end
     if not self.PlaybackTimers then return end
     for _, oldTimerName in pairs(self.PlaybackTimers) do
         if oldTimerName then timer.Remove(oldTimerName) end
@@ -138,6 +139,7 @@ function ENT:StopPlayback()
 end
 
 function ENT:StartPlayback()
+    if self.IsPlayingBack then return end
     if not self.PlaybackTimers then self.PlaybackTimers = {} end
     for _, oldTimerName in pairs(self.PlaybackTimers) do
         if oldTimerName then timer.Remove(oldTimerName) end
@@ -146,6 +148,8 @@ function ENT:StartPlayback()
     self.PlaybackCounter = (self.PlaybackCounter or 0) + 1
     self.IsPlayingBack = true
     self.PlaybackDirection = 1
+
+    
 
     for entIndex, frames in pairs(self.PlaybackData or {}) do
         local ent = Entity(entIndex)
@@ -161,6 +165,7 @@ function ENT:StartPlayback()
         ent:SetCollisionGroup(COLLISION_GROUP_NONE)
 
         local i = (self.PlaybackSpeed < 0) and frameCount or 1
+        self.i = i
         local timerName = "Playback_" .. self:EntIndex() .. "_" .. entIndex .. "_" .. self.PlaybackCounter
         self.PlaybackTimers[entIndex] = timerName
 
@@ -220,7 +225,9 @@ function ENT:StartPlayback()
                             if v then allDone = false; break end
                         end
                     end
-                    if allDone then self.IsPlayingBack = false end
+                    if allDone then
+                        self.IsPlayingBack = false
+                    end
                     return
                 end
             end
@@ -259,6 +266,7 @@ function ENT:StartPlayback()
             ent.NextFrameTime = CurTime() + math.abs(0.02 / (self.PlaybackSpeed or 1))
 
             i = i + (self.PlaybackDirection * (self.PlaybackSpeed < 0 and -1 or 1))
+            self.i = i
         end)
     end
 end
@@ -352,14 +360,24 @@ function ENT:TriggerInput(iname, value)
         self:StopPlayback()
     elseif iname == "PlaybackSpeed" then
         self.PlaybackSpeed = value
+    elseif iname == "LoopMode" then
+        self.LoopMode = value
     end
 end
 
 function ENT:Think()
-    if WireLib and self.IsPlayingBack ~= self.LastIsPlayingBack then
+    if not WireLib then return end
+
+    if self.IsPlayingBack ~= self.LastIsPlayingBack then
         WireLib.TriggerOutput(self, "IsPlaying", self.IsPlayingBack and 1 or 0)
         self.LastIsPlayingBack = self.IsPlayingBack
     end
+
+    if self.IsPlayingBack then
+        WireLib.TriggerOutput(self, "PlaybackSpeed", self.PlaybackSpeed)
+        WireLib.TriggerOutput(self, "Frame", self.i or 0)
+    end
+
     self:NextThink(CurTime())
     return true
 end
