@@ -101,13 +101,21 @@ function ENT:SetSoundPath(soundpath)
     self.SoundPath = soundpath
 end
 
-function ENT:UpdateSettings(speed, loopMode, playbackType, model, boxid, soundpath, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset)
-    self:SetPlaybackSettings(speed, loopMode, playbackType, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset)
+function ENT:UpdateSettings(
+    speed, loopMode, playbackType, model, boxid, soundpath,
+    easing, easing_amplitude, easing_frequency, easing_invert, easing_offset
+)
+    self:StopPlayback()
+    self:SetPlaybackSettings(
+        speed, loopMode, playbackType,
+        easing, easing_amplitude, easing_frequency, easing_invert, easing_offset
+    )
     self:SetModelPath(model)
     self:SetBoxID(boxid)
     self:SetSoundPath(soundpath)
     self:StartPlayback()
 end
+
 
 function ENT:Use(activator, caller)
     if not self.PlaybackData then return end
@@ -250,7 +258,7 @@ function ENT:StartPlayback()
             ent.TargetPos = frame.pos + basePos
             ent.TargetAng = frame.ang
 
-            -- Aplică proprietăți vizuale la fiecare frame!
+            
             if frame.material then ent:SetMaterial(frame.material) end
             if frame.color then ent:SetColor(frame.color) end
             if frame.renderfx then ent:SetRenderFX(frame.renderfx) end

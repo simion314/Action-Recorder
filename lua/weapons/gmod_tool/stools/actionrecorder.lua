@@ -50,16 +50,7 @@ local function StopPropRecording(ply, prop)
 end
 
 local function IsPropControlledByOtherBox(prop, myBoxID)
-    for _, box in pairs(ents.FindByClass("action_playback_box")) do
-        if IsValid(box) and box.BoxID ~= myBoxID and box.IsPlayingBack and istable(box.PlaybackData) then
-            for k, _ in pairs(box.PlaybackData) do
-                if k == prop:EntIndex() then
-                    return true
-                end
-            end
-        end
-    end
-    return false
+    return ActionRecorder.ActivePlaybacks and ActionRecorder.ActivePlaybacks[prop:EntIndex()] ~= nil
 end
 
 local function StartPropRecording(ply, prop, boxid)
