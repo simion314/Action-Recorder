@@ -548,20 +548,4 @@ if CLIENT then
         
     end)
 
-    
-    hook.Add("EntityEmitSound", "MuteToolgunIfActionRecorder", function(data)
-        local ply = LocalPlayer()
-        if not IsValid(ply) then return end
-
-        local wep = ply:GetActiveWeapon()
-        if not IsValid(wep) or wep:GetClass() ~= "gmod_tool" then return end
-
-        local tool = ply:GetTool()
-        if not tool or tool.Mode ~= "actionrecorder" then return end
-
-        local snd = string.lower(data.SoundName or "")
-        if snd:find("tools/") or snd:find("toolgun") or snd:find("airboat") then
-            return false 
-        end
-    end)
 end
