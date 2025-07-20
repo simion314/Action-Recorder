@@ -171,8 +171,14 @@ function TOOL:LeftClick(trace)
         end
 
         ply:ChatPrint("Recording enabled! Only your props will record (and not props already controlled by other boxes).")
+        umsg.Start("ActionRecorder_ToggleRecording", ply)
+        umsg.Bool(true)
+        umsg.End()
     else
         ply:ChatPrint("Recording disabled! Right click to place playback box / update settings.")
+        umsg.Start("ActionRecorder_ToggleRecording", ply)
+        umsg.Bool(false)
+        umsg.End()
     end
     return true
 end
@@ -258,6 +264,29 @@ end
 
 if CLIENT then
     include("vgui/action_recorder_graph_editor.lua")
+
+    local isRecording = false
+
+    usermessage.Hook("ActionRecorder_ToggleRecording", function(um)
+        isRecording = um:ReadBool()
+        if isRecording then
+            surface.PlaySound("action_recorder/start_recording.wav")
+        else
+            surface.PlaySound("action_recorder/stop_recording.wav")
+        end
+    end)
+
+    hook.Add("HUDPaint", "ActionRecorder_HUDPaint", function()
+        local ply = LocalPlayer()
+        if ply:GetTool("actionrecorder") and isRecording then
+            local material = Material("vgui/action_recorder_hud_rec.png")
+            if not material or material:IsError() then return end
+
+            surface.SetDrawColor(255, 255, 255, 255)
+            surface.SetMaterial(material)
+            surface.DrawTexturedRect(ScrW() - 450, 0, 500, 300)
+        end
+    end)
 end
 
 function TOOL.BuildCPanel(panel)
@@ -306,6 +335,9 @@ function TOOL:GetSetConVars(ply)
         "actionrecorder_boxid",
         "actionrecorder_key",
         "actionrecorder_soundpath",
+        "actionrecorder_startsound",
+        "actionrecorder_stopsound",
+        "actionrecorder_hudmaterial",
         "actionrecorder_easing",
         "actionrecorder_easing_amplitude",
         "actionrecorder_easing_frequency",
