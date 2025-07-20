@@ -1,5 +1,6 @@
 TOOL.Category = "Utility"
 TOOL.Name = "#Action Recorder"
+TOOL.Mode = "actionrecorder"
 
 if CLIENT then
     language.Add("tool.actionrecorder.name", "Action Recorder")
@@ -35,6 +36,13 @@ else
     CreateClientConVar("actionrecorder_easing_invert", "0", true, true)
     CreateClientConVar("actionrecorder_easing_offset", "0", true, true)
 end
+
+if SERVER then
+    util.AddNetworkString("ActionRecorder_PlayStartSound")
+    util.AddNetworkString("ActionRecorder_PlayStopSound")
+	util.AddNetworkString("ActionRecorderNotify")
+end
+
 
 local function vectorsDifferent(a, b)
     return not a or not b or a.x ~= b.x or a.y ~= b.y or a.z ~= b.z
@@ -144,47 +152,69 @@ hook.Add("Think", "ActionRecorder_Think", function()
 end)
 
 function TOOL:LeftClick(trace)
-    if CLIENT then return true end
-    local ply = self:GetOwner()
-    ply.ActionRecorderEnabled = not ply.ActionRecorderEnabled
+    if SERVER then
+        local ply = self:GetOwner()
+        ply.ActionRecorderEnabled = not ply.ActionRecorderEnabled
 
-    local globalMode = GetConVar("actionrecorder_globalmode"):GetBool()
-    local boxid
-    if globalMode and ply:IsAdmin() then
-        boxid = GetConVar("actionrecorder_boxid"):GetString() or "Box"
-    else
-        boxid = ply:GetInfo("actionrecorder_boxid") or "Box"
-    end
+        local globalMode = GetConVar("actionrecorder_globalmode"):GetBool()
+        local boxid
+        if globalMode and ply:IsAdmin() then
+            boxid = GetConVar("actionrecorder_boxid"):GetString() or "Box"
+        else
+            boxid = ply:GetInfo("actionrecorder_boxid") or "Box"
+        end
 
-    if ply.ActionRecorderEnabled then
-        ply.ActionRecordData = {}
+        if ply.ActionRecorderEnabled then
+            
+            net.Start("ActionRecorder_PlayStartSound")
+            net.Send(ply)
+            
+            net.Start("ActionRecorderNotify")
+            net.WriteString("Recording enabled!")
+            net.WriteInt(3, 3) 
+            net.Send(ply)
 
-        for _, ent in pairs(ents.GetAll()) do
-            if IsValid(ent) and not ent:IsPlayer() then
-                if ent.GetCreator and ent:GetCreator() == ply and not IsPropControlledByOtherBox(ent, boxid) then
-                    local phys = ent:GetPhysicsObject()
-                    if IsValid(phys) then
-                        StartPropRecording(ply, ent, boxid)
+            ply.ActionRecordData = {}
+
+            for _, ent in pairs(ents.GetAll()) do
+                if IsValid(ent) and not ent:IsPlayer() then
+                    if ent.GetCreator and ent:GetCreator() == ply and not IsPropControlledByOtherBox(ent, boxid) then
+                        local phys = ent:GetPhysicsObject()
+                        if IsValid(phys) then
+                            StartPropRecording(ply, ent, boxid)
+                        end
                     end
                 end
             end
-        end
 
-        ply:ChatPrint("Recording enabled! Only your props will record (and not props already controlled by other boxes).")
-        umsg.Start("ActionRecorder_ToggleRecording", ply)
-        umsg.Bool(true)
-        umsg.End()
-    else
-        ply:ChatPrint("Recording disabled! Right click to place playback box / update settings.")
-        umsg.Start("ActionRecorder_ToggleRecording", ply)
-        umsg.Bool(false)
-        umsg.End()
+            umsg.Start("ActionRecorder_ToggleRecording", ply)
+            umsg.Bool(true)
+            umsg.End()
+        else
+            net.Start("ActionRecorder_PlayStopSound")
+            net.Send(ply)
+            net.Start("ActionRecorderNotify")
+            net.WriteString("Recording disabled! Right click to place playback box / update settings.")
+            net.WriteInt(3, 3)
+            net.Send(ply)
+
+            umsg.Start("ActionRecorder_ToggleRecording", ply)
+            umsg.Bool(false)
+            umsg.End()
+        end
     end
+
     return true
 end
 
+
+
+
+
+
 function TOOL:RightClick(trace)
     if CLIENT then return true end
+
     local ply = self:GetOwner()
     local globalMode = GetConVar("actionrecorder_globalmode"):GetBool()
     local speed, loop, playbackType, model, boxid, key, soundpath, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset
@@ -229,20 +259,26 @@ function TOOL:RightClick(trace)
     end
 
     if updated then
-        ply:ChatPrint("Playback box(es) with BoxID '"..boxid.."' updated with new settings!")
+        net.Start("ActionRecorderNotify")
+        net.WriteString("Playback box with BoxID '" .. boxid .. "' updated with new settings!")
+        net.WriteInt(3, 3) 
+        net.Send(ply)
         return true
     end
 
     if not ply.ActionRecordData or table.Count(ply.ActionRecordData) == 0 then
-        ply:ChatPrint("No recording found!")
+        net.Start("ActionRecorderNotify")
+        net.WriteString("No recording found!")
+        net.WriteInt(3, 3)
+        net.Send(ply)
         return false
     end
 
     local ent = ents.Create("action_playback_box")
     if not IsValid(ent) then return false end
-    ent:SetPos(trace.HitPos + Vector(0,0,10))
-    ent:Spawn()
 
+    ent:SetPos(trace.HitPos + Vector(0, 0, 10))
+    ent:Spawn()
     ent:SetPlaybackData(ply.ActionRecordData)
     ent:SetPlaybackSettings(speed, loop, playbackType, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset)
     ent:SetModelPath(model)
@@ -257,10 +293,19 @@ function TOOL:RightClick(trace)
         undo.SetPlayer(ply)
     undo.Finish()
 
-    ply:ChatPrint("Playback box placed! Press E on it to start playback.")
+    net.Start("ActionRecorderNotify")
+    net.WriteString("Playback box placed! Press E on it to start playback.")
+    net.WriteInt(3, 3)
+    net.Send(ply)
+
     ply.ActionRecordData = nil
+
     return true
 end
+
+
+
+
 
 if CLIENT then
     include("vgui/action_recorder_graph_editor.lua")
@@ -290,11 +335,31 @@ if CLIENT then
 end
 
 function TOOL.BuildCPanel(panel)
+    local header = vgui.Create("DLabel", panel)
+    header:SetFont("DermaLarge")
+    header:SetText("Action Recorder")
+    header:SetTextColor(Color(0, 170, 255))
+    header:Dock(TOP)
+    header:DockMargin(0, 0, 0, 10)
+    header:SetContentAlignment(5)
+    panel:AddItem(header)
+
+    local subtitle = vgui.Create("DLabel", panel)
+    subtitle:SetFont("DermaDefault")
+    subtitle:SetText("Record and replay your props with ease.")
+    subtitle:SetTextColor(Color(97, 97, 97))
+    subtitle:Dock(TOP)
+    subtitle:DockMargin(0, 0, 0, 20)
+    subtitle:SetContentAlignment(5)
+    panel:AddItem(subtitle)
+
     panel:NumSlider("Playback Speed", "actionrecorder_playbackspeed", -500, 500, 2):SetDecimals(2)
+
     local loop_combo = panel:ComboBox("Loop Mode", "actionrecorder_loop")
     loop_combo:AddChoice("No Loop", 0, true)
     loop_combo:AddChoice("Loop", 1)
     loop_combo:AddChoice("Ping-Pong", 2)
+
     local combo = panel:ComboBox("Playback Type", "actionrecorder_playbacktype")
     combo:AddChoice("absolute", "absolute", true)
     combo:AddChoice("relative", "relative")
@@ -304,13 +369,24 @@ function TOOL.BuildCPanel(panel)
     panel:TextEntry("Activation Sound", "actionrecorder_soundpath")
     panel:KeyBinder("Playback Key", "actionrecorder_key")
 
+    local easingLabel = vgui.Create("DLabel", panel)
+    easingLabel:SetFont("DermaDefaultBold")
+    easingLabel:SetText("Easing Settings")
+    easingLabel:SetTextColor(Color(172, 139, 21))
+    easingLabel:Dock(TOP)
+    easingLabel:DockMargin(0, 10, 0, 5)
+    easingLabel:SetContentAlignment(4)
+    panel:AddItem(easingLabel)
+
     panel:Help("Easing is an experimental feature and may not always work as intended.")
+
     local easing_combo = panel:ComboBox("Easing", "actionrecorder_easing")
     for name, _ in pairs(ActionRecorder.EasingFunctions) do
         easing_combo:AddChoice(name)
     end
 
     panel:Help("To use a custom easing graph, set the Easing type to \"Custom\".")
+
     local custom_easing_button = panel:Button("Edit Custom Easing", "actionrecorder_edit_custom_easing")
     custom_easing_button:SetSize(150, 20)
     custom_easing_button:SetImage("icon16/page_white_edit.png")
@@ -323,7 +399,20 @@ function TOOL.BuildCPanel(panel)
     panel:NumSlider("Easing Frequency", "actionrecorder_easing_frequency", 0, 10, 2)
     panel:CheckBox("Invert Easing", "actionrecorder_easing_invert")
     panel:NumSlider("Easing Offset", "actionrecorder_easing_offset", -1, 1, 2)
+	
+	
+	
+	local signature = vgui.Create("DImage", panel)
+    signature:SetImage("vgui/action_recorder_signature.png") 
+    signature:SetSize(340, 255) 
+    signature:Dock(TOP)
+    signature:DockMargin(0, 20, 0, 0)
+    signature:SetKeepAspect(true)
+    panel:AddItem(signature)
+	
+
 end
+
 
 function TOOL:GetSetConVars(ply)
     local globalMode = GetConVar("actionrecorder_globalmode"):GetBool()
@@ -380,6 +469,7 @@ local function GetEasingFunction(name)
 end
 
 if CLIENT then
+    ActionRecorder = ActionRecorder or {}
     ActionRecorder.EasingFunctions = ActionRecorder.EasingFunctions or {}
     ActionRecorder.EasingFunctions["Linear"] = function(t, amp, freq, inv, offset) return t end
     ActionRecorder.EasingFunctions["Sine"] = function(t, amp, freq, inv, offset) return math.sin(t * math.pi * freq + offset) * amp end
@@ -442,4 +532,36 @@ if CLIENT then
         end
         return y_val * amp
     end
+
+    net.Receive("ActionRecorder_PlayStartSound", function()
+        surface.PlaySound("action_recorder/start_recording.wav")
+    end)
+
+    net.Receive("ActionRecorder_PlayStopSound", function()
+        surface.PlaySound("action_recorder/stop_recording.wav")
+    end)
+
+    net.Receive("ActionRecorderNotify", function()
+        local msg = net.ReadString()
+        local typ = net.ReadInt(3)
+        notification.AddLegacy(msg, typ, 5)
+        
+    end)
+
+    
+    hook.Add("EntityEmitSound", "MuteToolgunIfActionRecorder", function(data)
+        local ply = LocalPlayer()
+        if not IsValid(ply) then return end
+
+        local wep = ply:GetActiveWeapon()
+        if not IsValid(wep) or wep:GetClass() ~= "gmod_tool" then return end
+
+        local tool = ply:GetTool()
+        if not tool or tool.Mode ~= "actionrecorder" then return end
+
+        local snd = string.lower(data.SoundName or "")
+        if snd:find("tools/") or snd:find("toolgun") or snd:find("airboat") then
+            return false 
+        end
+    end)
 end
