@@ -4,7 +4,7 @@ ENT.Type = "anim"
 ENT.Base = "base_gmodentity"
 ENT.PrintName = "Action Playback Box"
 ENT.Category = "Utility"
-ENT.Spawnable = true
+ENT.Spawnable = false
 ENT.SoundPath = "buttons/button1.wav"
 
 function ENT:Initialize()

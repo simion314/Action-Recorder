@@ -261,47 +261,38 @@ if CLIENT then
 end
 
 function TOOL.BuildCPanel(panel)
-    panel:Help("Playback Speed (negative = reverse)")
     panel:NumSlider("Playback Speed", "actionrecorder_playbackspeed", -500, 500, 2):SetDecimals(2)
-    panel:Help("Loop Mode")
     local loop_combo = panel:ComboBox("Loop Mode", "actionrecorder_loop")
     loop_combo:AddChoice("No Loop", 0, true)
     loop_combo:AddChoice("Loop", 1)
     loop_combo:AddChoice("Ping-Pong", 2)
-    panel:Help("Playback Type")
     local combo = panel:ComboBox("Playback Type", "actionrecorder_playbacktype")
     combo:AddChoice("absolute", "absolute", true)
     combo:AddChoice("relative", "relative")
 
-    panel:Help("Easing")
+    panel:TextEntry("Model", "actionrecorder_model")
+    panel:TextEntry("Playback Box ID", "actionrecorder_boxid")
+    panel:TextEntry("Activation Sound", "actionrecorder_soundpath")
+    panel:KeyBinder("Playback Key", "actionrecorder_key")
+
+    panel:Help("Easing is an experimental feature and may not always work as intended.")
     local easing_combo = panel:ComboBox("Easing", "actionrecorder_easing")
     for name, _ in pairs(ActionRecorder.EasingFunctions) do
         easing_combo:AddChoice(name)
     end
 
+    panel:Help("To use a custom easing graph, set the Easing type to \"Custom\".")
     local custom_easing_button = panel:Button("Edit Custom Easing", "actionrecorder_edit_custom_easing")
     custom_easing_button:SetSize(150, 20)
     custom_easing_button:SetImage("icon16/page_white_edit.png")
+    custom_easing_button:SetTooltip("To use an easing type that utilizes the graph you made in the editor, set the easing type to the \"Custom\" option")
     custom_easing_button.DoClick = function()
         vgui.Create("ActionRecorderGraphEditor")
     end
 
-    panel:Help("Model Path")
-    panel:TextEntry("Model", "actionrecorder_model")
-    panel:Help("Playback Box ID / Name")
-    panel:TextEntry("Box ID", "actionrecorder_boxid")
-    panel:Help("Activation Sound")
-    panel:TextEntry("Sound Path", "actionrecorder_soundpath")
-    panel:Help("Keybind")
-    panel:KeyBinder("Playback Key", "actionrecorder_key")
-
-    panel:Help("Easing Amplitude")
     panel:NumSlider("Easing Amplitude", "actionrecorder_easing_amplitude", 0, 10, 2)
-    panel:Help("Easing Frequency")
     panel:NumSlider("Easing Frequency", "actionrecorder_easing_frequency", 0, 10, 2)
-    panel:Help("Easing Invert")
     panel:CheckBox("Invert Easing", "actionrecorder_easing_invert")
-    panel:Help("Easing Offset")
     panel:NumSlider("Easing Offset", "actionrecorder_easing_offset", -1, 1, 2)
 end
 
