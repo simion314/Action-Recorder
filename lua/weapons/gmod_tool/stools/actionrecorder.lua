@@ -43,6 +43,7 @@ if SERVER then
     util.AddNetworkString("ActionRecorder_PlayStopSound")
 	util.AddNetworkString("ActionRecorder_StopLoopSound")
 	util.AddNetworkString("ActionRecorderNotify")
+    util.AddNetworkString("ActionRecorder_FlashEffect")
 end
 
 
@@ -196,12 +197,22 @@ function TOOL:LeftClick(trace)
             umsg.Bool(true)
             umsg.End()
 
+            if GetConVar("ar_enable_filmgrain"):GetBool() then
+                net.Start("ActionRecorder_FlashEffect")
+                net.Send(ply)
+            end
+
         else
             net.Start("ActionRecorder_PlayStopSound")
             net.Send(ply)
 
             net.Start("ActionRecorder_StopLoopSound")  
             net.Send(ply)
+
+            if GetConVar("ar_enable_filmgrain"):GetBool() then
+                net.Start("ActionRecorder_FlashEffect")
+                net.Send(ply)
+            end
 
             net.Start("ActionRecorderNotify")
             net.WriteString("Recording disabled! Right click to place playback box / update settings.")
@@ -631,5 +642,29 @@ if CLIENT then
 
     net.Receive("ActionRecorder_StopLoopSound", function()
         loopActive = false
+    end)
+
+    local flashAlpha = 0
+    local flashStartTime = 0
+    local flashDuration = 0.2 -- seconds
+
+    net.Receive("ActionRecorder_FlashEffect", function()
+        flashAlpha = 255
+        flashStartTime = CurTime()
+    end)
+
+    hook.Add("HUDPaint", "ActionRecorder_FlashEffectHUD", function()
+        if flashAlpha > 0 then
+            local elapsed = CurTime() - flashStartTime
+            local progress = math.min(elapsed / flashDuration, 1)
+            local currentAlpha = math.max(0, 255 * (1 - progress))
+
+            surface.SetDrawColor(255, 255, 255, currentAlpha)
+            surface.DrawRect(0, 0, ScrW(), ScrH())
+
+            if progress >= 1 then
+                flashAlpha = 0
+            end
+        end
     end)
 end
