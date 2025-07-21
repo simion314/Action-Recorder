@@ -405,7 +405,7 @@ hook.Add("Think", "ActionRecorder_PlaybackThink", function()
                     maxspeeddamp = 10000,
                     maxangulardamp = 10000,
                     dampfactor = 1,
-                    teleportdistance = 0.1, -- Small non-zero value to prevent jittering
+                    teleportdistance = GetConVar("ar_physicsless_teleport"):GetBool() and 0.1 or 0,
                     deltaTime = FrameTime()
                 }
                 phys:Wake()

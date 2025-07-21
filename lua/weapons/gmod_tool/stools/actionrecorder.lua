@@ -372,6 +372,8 @@ if CLIENT then
                 end
             end
 
+            
+
             if GetConVar("ar_enable_hud"):GetBool() then
                 -- Draw the recording HUD element (on top)
                 local material = Material("vgui/action_recorder_hud_rec.png")
@@ -434,6 +436,7 @@ function TOOL.BuildCPanel(panel)
     generalSettingsForm:TextEntry("Model", "actionrecorder_model")
     generalSettingsForm:TextEntry("Playback Box ID", "actionrecorder_boxid")
     generalSettingsForm:TextEntry("Activation Sound", "actionrecorder_soundpath")
+    generalSettingsForm:CheckBox("Physicsless Teleport", "ar_physicsless_teleport")
     local keyBinder = vgui.Create("DBinder")
     keyBinder:SetConVar("actionrecorder_key")
     generalSettingsForm:AddItem(keyBinder)
