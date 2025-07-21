@@ -161,12 +161,25 @@ function ENT:StopPlayback(forceReturn)
     self.IsPlayingBack = false
     self.IsActivated = false
 
+    if self.LoopMode == 0 or self.LoopMode == 3 then
+        for entIndex, _ in pairs(self.PlaybackData or {}) do
+            local ent = Entity(entIndex)
+            if IsValid(ent) then
+                local phys = ent:GetPhysicsObject()
+                if IsValid(phys) then
+                    phys:EnableMotion(false)
+                end
+            end
+        end
+    end
+
     if self.LoopMode == 3 then -- No Loop (Smooth)
         self.PlaybackDirection = -1 -- Set direction to reverse for smooth return
         self.IsOneTimeSmoothReturn = true
         self:StartPlayback(true)
     end
 end
+
 
 function ENT:StartPlayback()
     if self.IsPlayingBack then return end
@@ -238,6 +251,12 @@ function ENT:StartPlayback()
                 if ent then
                     ent.IsBeingPlayedBack = false
                     ent.PlaybackBox = nil
+                    if self and (self.LoopMode == 0 or self.LoopMode == 3) then
+                        local phys = ent:GetPhysicsObject()
+                        if IsValid(phys) then
+                            phys:EnableMotion(false)
+                        end
+                    end
                 end
                 return
             end
@@ -248,6 +267,12 @@ function ENT:StartPlayback()
                 if ent then
                     ent.IsBeingPlayedBack = false
                     ent.PlaybackBox = nil
+                    if self and (self.LoopMode == 0 or self.LoopMode == 3) then
+                        local phys = ent:GetPhysicsObject()
+                        if IsValid(phys) then
+                            phys:EnableMotion(false)
+                        end
+                    end
                 end
                 return
             end
@@ -274,6 +299,12 @@ function ENT:StartPlayback()
                         if self.PlaybackTimers then self.PlaybackTimers[entIndex] = nil end
                         ent.IsBeingPlayedBack = false
                         ent.PlaybackBox = nil
+                        if self.LoopMode == 0 or self.LoopMode == 3 then
+                            local phys = ent:GetPhysicsObject()
+                            if IsValid(phys) then
+                                phys:EnableMotion(false)
+                            end
+                        end
                         local allDone = true
                         if self.PlaybackTimers then
                             for _, v in pairs(self.PlaybackTimers) do
@@ -287,12 +318,17 @@ function ENT:StartPlayback()
                         end
                         return
                     end
-                
                 else -- No Loop (original)
                     timer.Remove(timerName)
                     if self.PlaybackTimers then self.PlaybackTimers[entIndex] = nil end
                     ent.IsBeingPlayedBack = false
                     ent.PlaybackBox = nil
+                    if self.LoopMode == 0 or self.LoopMode == 3 then
+                        local phys = ent:GetPhysicsObject()
+                        if IsValid(phys) then
+                            phys:EnableMotion(false)
+                        end
+                    end
                     local allDone = true
                     if self.PlaybackTimers then
                         for _, v in pairs(self.PlaybackTimers) do
@@ -311,6 +347,12 @@ function ENT:StartPlayback()
                 if self.PlaybackTimers then self.PlaybackTimers[entIndex] = nil end
                 ent.IsBeingPlayedBack = false
                 ent.PlaybackBox = nil
+                if self.LoopMode == 0 or self.LoopMode == 3 then
+                    local phys = ent:GetPhysicsObject()
+                    if IsValid(phys) then
+                        phys:EnableMotion(false)
+                    end
+                end
                 local allDone = true
                 if self.PlaybackTimers then
                     for _, v in pairs(self.PlaybackTimers) do
@@ -344,6 +386,7 @@ function ENT:StartPlayback()
         end)
     end
 end
+
 
 if CLIENT then
     function ENT:Draw()
