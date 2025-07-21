@@ -363,13 +363,29 @@ if CLIENT then
 end
 
 function TOOL.BuildCPanel(panel)
-	local signature = vgui.Create("DImage", panel)
+    local signature = vgui.Create("DImage", panel)
     signature:SetImage("vgui/action_recorder_signature.png") 
     signature:SetSize(340, 179) 
     signature:Dock(TOP)
-    signature:DockMargin(0, -40, 0, -10)
+    signature:DockMargin(0, -30, 0, -5)
     signature:SetKeepAspect(true)
     panel:AddItem(signature)
+
+    local sectionDividerGeneral = vgui.Create("DPanel", panel)
+    sectionDividerGeneral:SetTall(2) -- Thin line
+    sectionDividerGeneral:SetBackgroundColor(Color(50, 50, 50, 200)) -- Dark grey
+    sectionDividerGeneral:Dock(TOP)
+    sectionDividerGeneral:DockMargin(0, 2, 0, 2)
+    panel:AddItem(sectionDividerGeneral)
+
+    local generalLabel = vgui.Create("DLabel", panel)
+    generalLabel:SetFont("DermaDefaultBold")
+    generalLabel:SetText("General Settings")
+    generalLabel:SetTextColor(Color(150, 50, 50)) -- Pale yet dark red
+    generalLabel:Dock(TOP)
+    generalLabel:DockMargin(0, 2, 0, 2)
+    generalLabel:SetContentAlignment(4)
+    panel:AddItem(generalLabel)
 
     panel:NumSlider("Playback Speed", "actionrecorder_playbackspeed", -500, 500, 2):SetDecimals(2)
 
@@ -387,12 +403,19 @@ function TOOL.BuildCPanel(panel)
     panel:TextEntry("Activation Sound", "actionrecorder_soundpath")
     panel:KeyBinder("Playback Key", "actionrecorder_key")
 
+    local sectionDivider = vgui.Create("DPanel", panel)
+    sectionDivider:SetTall(2) -- Thin line
+    sectionDivider:SetBackgroundColor(Color(50, 50, 50, 200)) -- Dark grey
+    sectionDivider:Dock(TOP)
+    sectionDivider:DockMargin(0, 2, 0, 2)
+    panel:AddItem(sectionDivider)
+
     local easingLabel = vgui.Create("DLabel", panel)
     easingLabel:SetFont("DermaDefaultBold")
     easingLabel:SetText("Easing Settings")
     easingLabel:SetTextColor(Color(172, 139, 21))
     easingLabel:Dock(TOP)
-    easingLabel:DockMargin(0, 10, 0, 5)
+    easingLabel:DockMargin(0, 2, 0, 2)
     easingLabel:SetContentAlignment(4)
     panel:AddItem(easingLabel)
 
@@ -418,14 +441,19 @@ function TOOL.BuildCPanel(panel)
     panel:CheckBox("Invert Easing", "actionrecorder_easing_invert")
     panel:NumSlider("Easing Offset", "actionrecorder_easing_offset", -1, 1, 2)
 
-    
+    local sectionDivider2 = vgui.Create("DPanel", panel)
+    sectionDivider2:SetTall(2) -- Thin line
+    sectionDivider2:SetBackgroundColor(Color(50, 50, 50, 200)) -- Dark grey
+    sectionDivider2:Dock(TOP)
+    sectionDivider2:DockMargin(0, 5, 0, 5)
+    panel:AddItem(sectionDivider2)
 
     local clientLabel = vgui.Create("DLabel", panel)
     clientLabel:SetFont("DermaDefaultBold")
     clientLabel:SetText("Client Settings")
     clientLabel:SetTextColor(Color(21, 172, 139))
     clientLabel:Dock(TOP)
-    clientLabel:DockMargin(0, 10, 0, 5)
+    clientLabel:DockMargin(0, 5, 0, 5)
     clientLabel:SetContentAlignment(4)
     panel:AddItem(clientLabel)
 
