@@ -386,42 +386,51 @@ if CLIENT then
 end
 
 function TOOL.BuildCPanel(panel)
+    local color_red    = Color(222, 33, 16)
+    local color_yellow = Color(252, 209, 22)
+    local color_blue   = Color(0, 61, 165)
+
+    local function colorHeader(form, col)
+        timer.Simple(0, function()
+            if not IsValid(form) or not IsValid(form.Header) then return end
+            form.Header.Paint = function(self, w, h)
+                draw.RoundedBox(6, 0, 0, w, h, col)
+                
+            end
+        end)
+    end
+
     local signature = vgui.Create("DImage", panel)
-    signature:SetImage("vgui/action_recorder_signature.png") 
-    signature:SetSize(340, 179) 
+    signature:SetImage("vgui/action_recorder_signature.png")
+    signature:SetSize(340, 179)
     signature:Dock(TOP)
     signature:DockMargin(0, -30, 0, -5)
     signature:SetKeepAspect(true)
     panel:AddItem(signature)
 
     local sectionDividerGeneral = vgui.Create("DPanel", panel)
-    sectionDividerGeneral:SetTall(2) -- Thin line
-    sectionDividerGeneral:SetBackgroundColor(Color(50, 50, 50, 200)) -- Dark grey
+    sectionDividerGeneral:SetTall(2)
+    sectionDividerGeneral:SetBackgroundColor(Color(50, 50, 50, 200))
     sectionDividerGeneral:Dock(TOP)
     sectionDividerGeneral:DockMargin(0, 2, 0, 2)
     panel:AddItem(sectionDividerGeneral)
 
+    
     local generalSettingsForm = vgui.Create("DForm", panel)
     generalSettingsForm:SetName("General Settings")
-    
-    
-    
     generalSettingsForm:Dock(TOP)
     generalSettingsForm:DockMargin(0, 2, 0, 2)
     panel:AddItem(generalSettingsForm)
-
+    colorHeader(generalSettingsForm, color_red)
     generalSettingsForm:NumSlider("Playback Speed", "actionrecorder_playbackspeed", -500, 500, 2):SetDecimals(2)
-
     local loop_combo = generalSettingsForm:ComboBox("Loop Mode", "actionrecorder_loop")
     loop_combo:AddChoice("No Loop", 0, true)
     loop_combo:AddChoice("Loop", 1)
     loop_combo:AddChoice("Ping-Pong", 2)
     loop_combo:AddChoice("No Loop (Smooth)", 3)
-
     local combo = generalSettingsForm:ComboBox("Playback Type", "actionrecorder_playbacktype")
     combo:AddChoice("absolute", "absolute", true)
     combo:AddChoice("relative", "relative")
-
     generalSettingsForm:TextEntry("Model", "actionrecorder_model")
     generalSettingsForm:TextEntry("Playback Box ID", "actionrecorder_boxid")
     generalSettingsForm:TextEntry("Activation Sound", "actionrecorder_soundpath")
@@ -430,37 +439,33 @@ function TOOL.BuildCPanel(panel)
     generalSettingsForm:AddItem(keyBinder)
 
     local sectionDivider = vgui.Create("DPanel", panel)
-    sectionDivider:SetTall(2) -- Thin line
-    sectionDivider:SetBackgroundColor(Color(50, 50, 50, 200)) -- Dark grey
+    sectionDivider:SetTall(2)
+    sectionDivider:SetBackgroundColor(Color(50, 50, 50, 200))
     sectionDivider:Dock(TOP)
     sectionDivider:DockMargin(0, 2, 0, 2)
     panel:AddItem(sectionDivider)
 
+    
     local easingSettingsForm = vgui.Create("DForm", panel)
     easingSettingsForm:SetName("Easing Settings")
-    
-    
     easingSettingsForm:Dock(TOP)
     easingSettingsForm:DockMargin(0, 2, 0, 2)
     panel:AddItem(easingSettingsForm)
-
+    colorHeader(easingSettingsForm, color_yellow)
     local easingHelpLabel = vgui.Create("DLabel", easingSettingsForm)
     easingHelpLabel:SetText("Easing is an experimental feature and may not always work as intended.")
-    easingHelpLabel:SetTextColor(Color(0, 0, 128)) -- Dark blue text
+    easingHelpLabel:SetTextColor(Color(0, 0, 128))
     easingHelpLabel:SetWrap(true)
     easingSettingsForm:AddItem(easingHelpLabel)
-
     local easing_combo = easingSettingsForm:ComboBox("Easing", "actionrecorder_easing")
     for name, _ in pairs(ActionRecorder.EasingFunctions) do
         easing_combo:AddChoice(name)
     end
-
     local easingComboHelpLabel = vgui.Create("DLabel", easingSettingsForm)
     easingComboHelpLabel:SetText("To use a custom easing graph, set the Easing type to \"Custom\".")
-    easingComboHelpLabel:SetTextColor(Color(0, 0, 128)) -- Dark blue text
+    easingComboHelpLabel:SetTextColor(Color(0, 0, 128))
     easingComboHelpLabel:SetWrap(true)
     easingSettingsForm:AddItem(easingComboHelpLabel)
-
     local custom_easing_button = easingSettingsForm:Button("Edit Custom Easing", "actionrecorder_edit_custom_easing")
     custom_easing_button:SetSize(150, 20)
     custom_easing_button:SetImage("icon16/page_white_edit.png")
@@ -468,32 +473,31 @@ function TOOL.BuildCPanel(panel)
     custom_easing_button.DoClick = function()
         vgui.Create("ActionRecorderGraphEditor")
     end
-
     easingSettingsForm:NumSlider("Easing Amplitude", "actionrecorder_easing_amplitude", 0, 10, 2)
     easingSettingsForm:NumSlider("Easing Frequency", "actionrecorder_easing_frequency", 0, 10, 2)
     easingSettingsForm:CheckBox("Invert Easing", "actionrecorder_easing_invert")
     easingSettingsForm:NumSlider("Easing Offset", "actionrecorder_easing_offset", -1, 1, 2)
 
     local sectionDivider2 = vgui.Create("DPanel", panel)
-    sectionDivider2:SetTall(2) -- Thin line
-    sectionDivider2:SetBackgroundColor(Color(50, 50, 50, 200)) -- Dark grey
+    sectionDivider2:SetTall(2)
+    sectionDivider2:SetBackgroundColor(Color(50, 50, 50, 200))
     sectionDivider2:Dock(TOP)
     sectionDivider2:DockMargin(0, 5, 0, 5)
     panel:AddItem(sectionDivider2)
 
+    
     local clientSettingsForm = vgui.Create("DForm", panel)
     clientSettingsForm:SetName("Client Settings")
-    
-    
     clientSettingsForm:Dock(TOP)
     clientSettingsForm:DockMargin(0, 5, 0, 5)
     panel:AddItem(clientSettingsForm)
-
+    colorHeader(clientSettingsForm, color_blue)
     clientSettingsForm:CheckBox("Enable HUD", "ar_enable_hud")
     clientSettingsForm:CheckBox("Enable Custom Placement Sounds", "ar_enable_sounds")
     clientSettingsForm:CheckBox("Enable Film Grain Effect", "ar_enable_filmgrain")
-
 end
+
+
 
 
 function TOOL:GetSetConVars(ply)
