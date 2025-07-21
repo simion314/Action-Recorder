@@ -314,44 +314,62 @@ if CLIENT then
 
     usermessage.Hook("ActionRecorder_ToggleRecording", function(um)
         isRecording = um:ReadBool()
-        if isRecording then
-            surface.PlaySound("action_recorder/start_recording.wav")
-        else
-            surface.PlaySound("action_recorder/stop_recording.wav")
-        end
     end)
 
     hook.Add("HUDPaint", "ActionRecorder_HUDPaint", function()
         local ply = LocalPlayer()
         if ply:GetTool("actionrecorder") and isRecording then
-            local material = Material("vgui/action_recorder_hud_rec.png")
-            if not material or material:IsError() then return end
+            if GetConVar("ar_enable_filmgrain"):GetBool() then
+                -- Apply film-like effect
+                -- Subtle sepia tone
+                DrawColorModify({
+                    ["$pp_colour_addr"] = 0,
+                    ["$pp_colour_addg"] = 0,
+                    ["$pp_colour_addb"] = 0,
+                    ["$pp_colour_contrast"] = 1.0,
+                    ["$pp_colour_brightness"] = 0.0,
+                    ["$pp_colour_desaturation"] = 0.05, -- Even more subtle desaturation
+                    ["$pp_colour_mulr"] = 1.0,
+                    ["$pp_colour_mulg"] = 0.95, -- Less green tint
+                    ["$pp_colour_mulb"] = 0.9,  -- Less blue tint
+                })
 
-            surface.SetDrawColor(255, 255, 255, 255)
-            surface.SetMaterial(material)
-            surface.DrawTexturedRect(ScrW() - 450, 0, 500, 300)
+                -- Film grain overlay using noise.vmt
+                local noiseMaterial = Material("overlays/noise.vmt")
+                if noiseMaterial and not noiseMaterial:IsError() then
+                    render.SetMaterial(noiseMaterial)
+                    render.DrawScreenQuad()
+                end
+
+                -- Additive noise overlay using noiseadd.vmt for enhanced effect
+                local noiseAddMaterial = Material("overlays/noiseadd.vmt")
+                if noiseAddMaterial and not noiseAddMaterial:IsError() then
+                    render.SetMaterial(noiseAddMaterial)
+                    render.DrawScreenQuad()
+                end
+            end
+
+            if GetConVar("ar_enable_hud"):GetBool() then
+                -- Draw the recording HUD element (on top)
+                local material = Material("vgui/action_recorder_hud_rec.png")
+                if not material or material:IsError() then return end
+
+                surface.SetDrawColor(255, 255, 255, 255)
+                surface.SetMaterial(material)
+                surface.DrawTexturedRect(ScrW() - 450, 0, 500, 300)
+            end
         end
     end)
 end
 
 function TOOL.BuildCPanel(panel)
-    local header = vgui.Create("DLabel", panel)
-    header:SetFont("DermaLarge")
-    header:SetText("Action Recorder")
-    header:SetTextColor(Color(0, 170, 255))
-    header:Dock(TOP)
-    header:DockMargin(0, 0, 0, 10)
-    header:SetContentAlignment(5)
-    panel:AddItem(header)
-
-    local subtitle = vgui.Create("DLabel", panel)
-    subtitle:SetFont("DermaDefault")
-    subtitle:SetText("Record and replay your props with ease.")
-    subtitle:SetTextColor(Color(97, 97, 97))
-    subtitle:Dock(TOP)
-    subtitle:DockMargin(0, 0, 0, 20)
-    subtitle:SetContentAlignment(5)
-    panel:AddItem(subtitle)
+	local signature = vgui.Create("DImage", panel)
+    signature:SetImage("vgui/action_recorder_signature.png") 
+    signature:SetSize(340, 179) 
+    signature:Dock(TOP)
+    signature:DockMargin(0, -40, 0, -10)
+    signature:SetKeepAspect(true)
+    panel:AddItem(signature)
 
     panel:NumSlider("Playback Speed", "actionrecorder_playbackspeed", -500, 500, 2):SetDecimals(2)
 
@@ -399,17 +417,19 @@ function TOOL.BuildCPanel(panel)
     panel:NumSlider("Easing Frequency", "actionrecorder_easing_frequency", 0, 10, 2)
     panel:CheckBox("Invert Easing", "actionrecorder_easing_invert")
     panel:NumSlider("Easing Offset", "actionrecorder_easing_offset", -1, 1, 2)
-	
-	
-	
-	local signature = vgui.Create("DImage", panel)
-    signature:SetImage("vgui/action_recorder_signature.png") 
-    signature:SetSize(340, 255) 
-    signature:Dock(TOP)
-    signature:DockMargin(0, 20, 0, 0)
-    signature:SetKeepAspect(true)
-    panel:AddItem(signature)
-	
+
+    local clientLabel = vgui.Create("DLabel", panel)
+    clientLabel:SetFont("DermaDefaultBold")
+    clientLabel:SetText("Client Settings")
+    clientLabel:SetTextColor(Color(21, 172, 139))
+    clientLabel:Dock(TOP)
+    clientLabel:DockMargin(0, 10, 0, 5)
+    clientLabel:SetContentAlignment(4)
+    panel:AddItem(clientLabel)
+
+    panel:CheckBox("Enable HUD", "ar_enable_hud")
+    panel:CheckBox("Enable Custom Placement Sounds", "ar_enable_sounds")
+    panel:CheckBox("Enable Film Grain Effect", "ar_enable_filmgrain")
 
 end
 
@@ -534,10 +554,12 @@ if CLIENT then
     end
 
     net.Receive("ActionRecorder_PlayStartSound", function()
+        if not GetConVar("ar_enable_sounds"):GetBool() then return end
         surface.PlaySound("action_recorder/start_recording.wav")
     end)
 
     net.Receive("ActionRecorder_PlayStopSound", function()
+        if not GetConVar("ar_enable_sounds"):GetBool() then return end
         surface.PlaySound("action_recorder/stop_recording.wav")
     end)
 
