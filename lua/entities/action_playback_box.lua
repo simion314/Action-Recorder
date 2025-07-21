@@ -28,6 +28,12 @@ function ENT:Initialize()
     self.LastIsPlayingBack = false
     self.BoxID = "Box"
     self.NumpadKey = self.NumpadKey or 5
+    self.IsOneTimeSmoothReturn = false
+    
+    self.IsActivated = false
+    self.InitialPositions = {}
+    self.InitialAngles = {}
+    self.ShouldSmoothReturn = false
 
     if SERVER and not self:GetNWString("OwnerName", nil) then
         self:SetNWString("OwnerName", "Unknown")
@@ -48,7 +54,12 @@ function ENT:SetupNumpad()
         numpad.Remove(self.NumpadBind)
         self.NumpadBind = nil
     end
+    if self.NumpadUpBind then
+        numpad.Remove(self.NumpadUpBind)
+        self.NumpadUpBind = nil
+    end
     self.NumpadBind = numpad.OnDown(self:GetOwner(), self.NumpadKey, "ActionRecorder_Playback", self)
+    self.NumpadUpBind = numpad.OnUp(self:GetOwner(), self.NumpadKey, "ActionRecorder_Playback_Release", self)
 end
 
 function ENT:OnRemove()
@@ -61,6 +72,10 @@ function ENT:OnRemove()
     if self.NumpadBind then
         numpad.Remove(self.NumpadBind)
         self.NumpadBind = nil
+    end
+    if self.NumpadUpBind then
+        numpad.Remove(self.NumpadUpBind)
+        self.NumpadUpBind = nil
     end
 end
 
@@ -120,7 +135,7 @@ end
 function ENT:Use(activator, caller)
     if not self.PlaybackData then return end
     self:EmitSound(self.SoundPath or "buttons/button3.wav")
-    self:StartPlayback()
+    self:StartPlayback(false)
 end
 
 local function IsPropControlledByOtherBox(prop, myBox)
@@ -136,18 +151,39 @@ local function IsPropControlledByOtherBox(prop, myBox)
     return false
 end
 
-function ENT:StopPlayback()
-    if not self.IsPlayingBack then return end
+function ENT:StopPlayback(forceReturn)
+    if not self.IsPlayingBack and not forceReturn then return end
     if not self.PlaybackTimers then return end
     for _, oldTimerName in pairs(self.PlaybackTimers) do
         if oldTimerName then timer.Remove(oldTimerName) end
     end
     self.PlaybackTimers = {}
     self.IsPlayingBack = false
+    self.IsActivated = false
+
+    if self.LoopMode == 3 then -- No Loop (Smooth)
+        self.PlaybackDirection = -1 -- Set direction to reverse for smooth return
+        self.IsOneTimeSmoothReturn = true
+        self:StartPlayback(true)
+    end
 end
 
 function ENT:StartPlayback()
     if self.IsPlayingBack then return end
+
+    -- Capture initial positions/angles when playback starts
+    if not self.IsPlayingBack then -- Only capture if not already playing
+        self.InitialPositions = {}
+        self.InitialAngles = {}
+        for entIndex, frames in pairs(self.PlaybackData or {}) do
+            local ent = Entity(entIndex)
+            if IsValid(ent) then
+                self.InitialPositions[entIndex] = ent:GetPos()
+                self.InitialAngles[entIndex] = ent:GetAngles()
+            end
+        end
+    end
+
     if not self.PlaybackTimers then self.PlaybackTimers = {} end
     for _, oldTimerName in pairs(self.PlaybackTimers) do
         if oldTimerName then timer.Remove(oldTimerName) end
@@ -156,8 +192,8 @@ function ENT:StartPlayback()
     self.PlaybackCounter = (self.PlaybackCounter or 0) + 1
     self.IsPlayingBack = true
     self.PlaybackDirection = 1
-
     
+    self.IsActivated = true
 
     for entIndex, frames in pairs(self.PlaybackData or {}) do
         local ent = Entity(entIndex)
@@ -191,6 +227,11 @@ function ENT:StartPlayback()
         ent.IsBeingPlayedBack = true
         ent.PlaybackBox = self
 
+        if false then
+            self.InitialPositions[entIndex] = ent:GetPos()
+            self.InitialAngles[entIndex] = ent:GetAngles()
+        end
+
         timer.Create(timerName, math.abs(0.02 / (self.PlaybackSpeed or 1)), 0, function()
             if not IsValid(self) or not self.PlaybackSpeed or not self.PlaybackTimers then
                 timer.Remove(timerName)
@@ -222,7 +263,32 @@ function ENT:StartPlayback()
                     i = i + (self.PlaybackDirection * (self.PlaybackSpeed < 0 and -1 or 1) * 2)
                     frame = frames[i]
                     basePos = (self.PlaybackType == "relative") and (ent:GetPos() - frame.pos) or Vector(0,0,0)
-                else -- No Loop
+                elseif self.LoopMode == 3 then -- No Loop (Smooth)
+                    if self.PlaybackDirection == 1 then -- Finished forward playback, start reverse
+                        self.PlaybackDirection = -1
+                        i = frameCount -- Start from the end for reverse
+                        frame = frames[i]
+                        basePos = (self.PlaybackType == "relative") and (ent:GetPos() - frame.pos) or Vector(0,0,0)
+                    else -- Finished reverse playback
+                        timer.Remove(timerName)
+                        if self.PlaybackTimers then self.PlaybackTimers[entIndex] = nil end
+                        ent.IsBeingPlayedBack = false
+                        ent.PlaybackBox = nil
+                        local allDone = true
+                        if self.PlaybackTimers then
+                            for _, v in pairs(self.PlaybackTimers) do
+                                if v then allDone = false; break end
+                            end
+                        end
+                        if allDone then
+                            self.IsPlayingBack = false
+                            self.PlaybackDirection = 1 -- Reset direction for next playback
+                            self.IsOneTimeSmoothReturn = false -- Reset flag
+                        end
+                        return
+                    end
+                
+                else -- No Loop (original)
                     timer.Remove(timerName)
                     if self.PlaybackTimers then self.PlaybackTimers[entIndex] = nil end
                     ent.IsBeingPlayedBack = false
@@ -346,6 +412,66 @@ hook.Add("Think", "ActionRecorder_PlaybackThink", function()
                 phys:ComputeShadowControl(params)
             end
         end
+
+        -- Smooth return for No Loop (Smooth) when playback is finished
+        if IsValid(ent) and ent.PlaybackBox and ent.PlaybackBox.IsOneTimeSmoothReturn and not ent.PlaybackBox.IsPlayingBack then
+            local playbackBox = ent.PlaybackBox
+            local initialPos = playbackBox.InitialPositions[ent:EntIndex()]
+            local initialAng = playbackBox.InitialAngles[ent:EntIndex()]
+
+            if initialPos and initialAng then
+                local phys = ent:GetPhysicsObject()
+                if IsValid(phys) then
+                    local alpha = (CurTime() - ent.LastFrameTime) / (ent.NextFrameTime - ent.LastFrameTime)
+                    alpha = math.Clamp(alpha, 0, 1)
+                    local original_alpha = alpha
+
+                    local easing_func = ActionRecorder.EasingFunctions[playbackBox.Easing or "Linear"]
+                    if easing_func then
+                        local t = alpha
+                        t = t + playbackBox.EasingOffset
+                        t = t * playbackBox.EasingFrequency
+
+                        local eased_alpha = easing_func(t)
+
+                        if eased_alpha ~= eased_alpha or math.abs(eased_alpha) == math.huge then
+                            eased_alpha = original_alpha
+                        end
+
+                        if playbackBox.EasingInvert then
+                            eased_alpha = 1 - eased_alpha
+                        end
+
+                        alpha = Lerp(playbackBox.EasingAmplitude, original_alpha, eased_alpha)
+
+                        if alpha ~= alpha or math.abs(alpha) == math.huge then
+                            alpha = eased_alpha
+                        end
+                    end
+
+                    local interpolatedPos = LerpVector(alpha, ent:GetPos(), initialPos)
+                    local interpolatedAng = LerpAngle(alpha, ent:GetAngles(), initialAng)
+
+                    local params = {
+                        pos = interpolatedPos,
+                        angle = interpolatedAng,
+                        maxspeed = 10000,
+                        maxangular = 10000,
+                        maxspeeddamp = 10000,
+                        maxangulardamp = 10000,
+                        dampfactor = 1,
+                        teleportdistance = 0.1, -- Small non-zero value to prevent jittering
+                        deltaTime = FrameTime()
+                    }
+                    phys:Wake()
+                    phys:ComputeShadowControl(params)
+
+                    if alpha >= 1 then
+                        playbackBox.IsOneTimeSmoothReturn = false
+                    end
+                end
+            end
+        end
     end
 end)
 
@@ -354,7 +480,12 @@ if SERVER then
         if not IsValid(ent) then return end
         if ent:GetNWString("OwnerName", "") ~= ply:Nick() then return end
         ent:EmitSound(ent.SoundPath or "buttons/button3.wav")
-        ent:StartPlayback()
+        ent:StartPlayback(false)
+    end)
+    numpad.Register("ActionRecorder_Playback_Release", function(ply, ent)
+        if not IsValid(ent) then return end
+        if ent:GetNWString("OwnerName", "") ~= ply:Nick() then return end
+        
     end)
     if WireLib then
         duplicator.RegisterEntityClass("action_playback_box", WireLib.MakeWireEnt, "Data")
@@ -362,10 +493,14 @@ if SERVER then
 end
 
 function ENT:TriggerInput(iname, value)
-    if iname == "Play" and value ~= 0 then
-        self:StartPlayback()
+    if iname == "Play" then
+        if value ~= 0 then
+            self:StartPlayback(true)
+        else
+            
+        end
     elseif iname == "Stop" and value ~= 0 then
-        self:StopPlayback()
+        self:StopPlayback(true)
     elseif iname == "PlaybackSpeed" then
         self.PlaybackSpeed = value
     elseif iname == "LoopMode" then

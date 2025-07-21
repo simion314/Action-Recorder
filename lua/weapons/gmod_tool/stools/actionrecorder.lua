@@ -1,4 +1,4 @@
-TOOL.Category = "Utility"
+TOOL.Category = "Construction"
 TOOL.Name = "#Action Recorder"
 TOOL.Mode = "actionrecorder"
 
@@ -405,6 +405,7 @@ function TOOL.BuildCPanel(panel)
     loop_combo:AddChoice("No Loop", 0, true)
     loop_combo:AddChoice("Loop", 1)
     loop_combo:AddChoice("Ping-Pong", 2)
+    loop_combo:AddChoice("No Loop (Smooth)", 3)
 
     local combo = panel:ComboBox("Playback Type", "actionrecorder_playbacktype")
     combo:AddChoice("absolute", "absolute", true)
