@@ -270,18 +270,27 @@ function TOOL:RightClick(trace)
         easing_offset = ply:GetInfoNum("actionrecorder_easing_offset", 0)
     end
 
-    local updated = false
+    local found_box_owned = nil
     for _, ent in pairs(ents.FindByClass("action_playback_box")) do
-        local entBoxID = ent.BoxID or (ent.GetNWString and ent:GetNWString("BoxID", ""))
+        local entBoxID = ent.GetNWString and ent:GetNWString("BoxID", "") or (ent.BoxID or "")
+        local entOwner = ent.GetOwner and ent:GetOwner() or nil
         if IsValid(ent) and entBoxID == boxid then
-            ent:UpdateSettings(speed, loop, playbackType, model, boxid, soundpath, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset)
-            ent.NumpadKey = key
-            if SERVER then ent:SetupNumpad() end
-            updated = true
+            if entOwner ~= ply then
+                net.Start("ActionRecorderNotify")
+                net.WriteString("BoxID is already in use by another player!")
+                net.WriteInt(3, 3)
+                net.Send(ply)
+                return false
+            else
+                found_box_owned = ent
+            end
         end
     end
 
-    if updated then
+    if found_box_owned then
+        found_box_owned:UpdateSettings(speed, loop, playbackType, model, boxid, soundpath, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset)
+        found_box_owned.NumpadKey = key
+        if SERVER then found_box_owned:SetupNumpad() end
         net.Start("ActionRecorderNotify")
         net.WriteString("Playback box with BoxID '" .. boxid .. "' updated with new settings!")
         net.WriteInt(3, 3) 
@@ -306,6 +315,7 @@ function TOOL:RightClick(trace)
     ent:SetPlaybackSettings(speed, loop, playbackType, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset)
     ent:SetModelPath(model)
     ent:SetBoxID(boxid)
+    ent:SetOwner(ply)
     ent:SetOwnerName(ply:Nick() or "Unknown")
     ent.NumpadKey = key
     ent:SetSoundPath(soundpath)
@@ -325,6 +335,7 @@ function TOOL:RightClick(trace)
 
     return true
 end
+
 
 
 
