@@ -39,7 +39,9 @@ end
 
 if SERVER then
     util.AddNetworkString("ActionRecorder_PlayStartSound")
+	util.AddNetworkString("ActionRecorder_PlayLoopSound")
     util.AddNetworkString("ActionRecorder_PlayStopSound")
+	util.AddNetworkString("ActionRecorder_StopLoopSound")
 	util.AddNetworkString("ActionRecorderNotify")
 end
 
@@ -165,13 +167,16 @@ function TOOL:LeftClick(trace)
         end
 
         if ply.ActionRecorderEnabled then
-            
+
             net.Start("ActionRecorder_PlayStartSound")
             net.Send(ply)
-            
+
+            net.Start("ActionRecorder_PlayLoopSound")
+            net.Send(ply)
+
             net.Start("ActionRecorderNotify")
             net.WriteString("Recording enabled!")
-            net.WriteInt(3, 3) 
+            net.WriteInt(3, 3)
             net.Send(ply)
 
             ply.ActionRecordData = {}
@@ -190,9 +195,14 @@ function TOOL:LeftClick(trace)
             umsg.Start("ActionRecorder_ToggleRecording", ply)
             umsg.Bool(true)
             umsg.End()
+
         else
             net.Start("ActionRecorder_PlayStopSound")
             net.Send(ply)
+
+            net.Start("ActionRecorder_StopLoopSound")  
+            net.Send(ply)
+
             net.Start("ActionRecorderNotify")
             net.WriteString("Recording disabled! Right click to place playback box / update settings.")
             net.WriteInt(3, 3)
@@ -206,6 +216,8 @@ function TOOL:LeftClick(trace)
 
     return true
 end
+
+
 
 
 
@@ -597,7 +609,26 @@ if CLIENT then
         local msg = net.ReadString()
         local typ = net.ReadInt(3)
         notification.AddLegacy(msg, typ, 5)
-        
     end)
 
+    
+    local loopActive = false
+    local LOOP_FILE = "action_recorder/recording_loop.wav"
+    local LOOP_DURATION = 1.2
+
+    local function PlayLoopSound()
+        if not loopActive then return end
+        surface.PlaySound(LOOP_FILE)
+        timer.Simple(LOOP_DURATION, PlayLoopSound)
+    end
+
+    net.Receive("ActionRecorder_PlayLoopSound", function()
+        if not GetConVar("ar_enable_sounds"):GetBool() then return end
+        loopActive = true
+        PlayLoopSound()
+    end)
+
+    net.Receive("ActionRecorder_StopLoopSound", function()
+        loopActive = false
+    end)
 end
