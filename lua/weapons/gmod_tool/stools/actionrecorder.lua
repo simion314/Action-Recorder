@@ -418,6 +418,8 @@ function TOOL.BuildCPanel(panel)
     panel:CheckBox("Invert Easing", "actionrecorder_easing_invert")
     panel:NumSlider("Easing Offset", "actionrecorder_easing_offset", -1, 1, 2)
 
+    
+
     local clientLabel = vgui.Create("DLabel", panel)
     clientLabel:SetFont("DermaDefaultBold")
     clientLabel:SetText("Client Settings")

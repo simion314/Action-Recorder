@@ -339,7 +339,7 @@ hook.Add("Think", "ActionRecorder_PlaybackThink", function()
                     maxspeeddamp = 10000,
                     maxangulardamp = 10000,
                     dampfactor = 1,
-                    teleportdistance = 0,
+                    teleportdistance = 0.1, -- Small non-zero value to prevent jittering
                     deltaTime = FrameTime()
                 }
                 phys:Wake()
