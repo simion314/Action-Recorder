@@ -401,31 +401,33 @@ function TOOL.BuildCPanel(panel)
     sectionDividerGeneral:DockMargin(0, 2, 0, 2)
     panel:AddItem(sectionDividerGeneral)
 
-    local generalLabel = vgui.Create("DLabel", panel)
-    generalLabel:SetFont("DermaDefaultBold")
-    generalLabel:SetText("General Settings")
-    generalLabel:SetTextColor(Color(150, 50, 50)) -- Pale yet dark red
-    generalLabel:Dock(TOP)
-    generalLabel:DockMargin(0, 2, 0, 2)
-    generalLabel:SetContentAlignment(4)
-    panel:AddItem(generalLabel)
+    local generalSettingsForm = vgui.Create("DForm", panel)
+    generalSettingsForm:SetName("General Settings")
+    
+    
+    
+    generalSettingsForm:Dock(TOP)
+    generalSettingsForm:DockMargin(0, 2, 0, 2)
+    panel:AddItem(generalSettingsForm)
 
-    panel:NumSlider("Playback Speed", "actionrecorder_playbackspeed", -500, 500, 2):SetDecimals(2)
+    generalSettingsForm:NumSlider("Playback Speed", "actionrecorder_playbackspeed", -500, 500, 2):SetDecimals(2)
 
-    local loop_combo = panel:ComboBox("Loop Mode", "actionrecorder_loop")
+    local loop_combo = generalSettingsForm:ComboBox("Loop Mode", "actionrecorder_loop")
     loop_combo:AddChoice("No Loop", 0, true)
     loop_combo:AddChoice("Loop", 1)
     loop_combo:AddChoice("Ping-Pong", 2)
     loop_combo:AddChoice("No Loop (Smooth)", 3)
 
-    local combo = panel:ComboBox("Playback Type", "actionrecorder_playbacktype")
+    local combo = generalSettingsForm:ComboBox("Playback Type", "actionrecorder_playbacktype")
     combo:AddChoice("absolute", "absolute", true)
     combo:AddChoice("relative", "relative")
 
-    panel:TextEntry("Model", "actionrecorder_model")
-    panel:TextEntry("Playback Box ID", "actionrecorder_boxid")
-    panel:TextEntry("Activation Sound", "actionrecorder_soundpath")
-    panel:KeyBinder("Playback Key", "actionrecorder_key")
+    generalSettingsForm:TextEntry("Model", "actionrecorder_model")
+    generalSettingsForm:TextEntry("Playback Box ID", "actionrecorder_boxid")
+    generalSettingsForm:TextEntry("Activation Sound", "actionrecorder_soundpath")
+    local keyBinder = vgui.Create("DBinder")
+    keyBinder:SetConVar("actionrecorder_key")
+    generalSettingsForm:AddItem(keyBinder)
 
     local sectionDivider = vgui.Create("DPanel", panel)
     sectionDivider:SetTall(2) -- Thin line
@@ -434,25 +436,32 @@ function TOOL.BuildCPanel(panel)
     sectionDivider:DockMargin(0, 2, 0, 2)
     panel:AddItem(sectionDivider)
 
-    local easingLabel = vgui.Create("DLabel", panel)
-    easingLabel:SetFont("DermaDefaultBold")
-    easingLabel:SetText("Easing Settings")
-    easingLabel:SetTextColor(Color(172, 139, 21))
-    easingLabel:Dock(TOP)
-    easingLabel:DockMargin(0, 2, 0, 2)
-    easingLabel:SetContentAlignment(4)
-    panel:AddItem(easingLabel)
+    local easingSettingsForm = vgui.Create("DForm", panel)
+    easingSettingsForm:SetName("Easing Settings")
+    
+    
+    easingSettingsForm:Dock(TOP)
+    easingSettingsForm:DockMargin(0, 2, 0, 2)
+    panel:AddItem(easingSettingsForm)
 
-    panel:Help("Easing is an experimental feature and may not always work as intended.")
+    local easingHelpLabel = vgui.Create("DLabel", easingSettingsForm)
+    easingHelpLabel:SetText("Easing is an experimental feature and may not always work as intended.")
+    easingHelpLabel:SetTextColor(Color(0, 0, 128)) -- Dark blue text
+    easingHelpLabel:SetWrap(true)
+    easingSettingsForm:AddItem(easingHelpLabel)
 
-    local easing_combo = panel:ComboBox("Easing", "actionrecorder_easing")
+    local easing_combo = easingSettingsForm:ComboBox("Easing", "actionrecorder_easing")
     for name, _ in pairs(ActionRecorder.EasingFunctions) do
         easing_combo:AddChoice(name)
     end
 
-    panel:Help("To use a custom easing graph, set the Easing type to \"Custom\".")
+    local easingComboHelpLabel = vgui.Create("DLabel", easingSettingsForm)
+    easingComboHelpLabel:SetText("To use a custom easing graph, set the Easing type to \"Custom\".")
+    easingComboHelpLabel:SetTextColor(Color(0, 0, 128)) -- Dark blue text
+    easingComboHelpLabel:SetWrap(true)
+    easingSettingsForm:AddItem(easingComboHelpLabel)
 
-    local custom_easing_button = panel:Button("Edit Custom Easing", "actionrecorder_edit_custom_easing")
+    local custom_easing_button = easingSettingsForm:Button("Edit Custom Easing", "actionrecorder_edit_custom_easing")
     custom_easing_button:SetSize(150, 20)
     custom_easing_button:SetImage("icon16/page_white_edit.png")
     custom_easing_button:SetTooltip("To use an easing type that utilizes the graph you made in the editor, set the easing type to the \"Custom\" option")
@@ -460,10 +469,10 @@ function TOOL.BuildCPanel(panel)
         vgui.Create("ActionRecorderGraphEditor")
     end
 
-    panel:NumSlider("Easing Amplitude", "actionrecorder_easing_amplitude", 0, 10, 2)
-    panel:NumSlider("Easing Frequency", "actionrecorder_easing_frequency", 0, 10, 2)
-    panel:CheckBox("Invert Easing", "actionrecorder_easing_invert")
-    panel:NumSlider("Easing Offset", "actionrecorder_easing_offset", -1, 1, 2)
+    easingSettingsForm:NumSlider("Easing Amplitude", "actionrecorder_easing_amplitude", 0, 10, 2)
+    easingSettingsForm:NumSlider("Easing Frequency", "actionrecorder_easing_frequency", 0, 10, 2)
+    easingSettingsForm:CheckBox("Invert Easing", "actionrecorder_easing_invert")
+    easingSettingsForm:NumSlider("Easing Offset", "actionrecorder_easing_offset", -1, 1, 2)
 
     local sectionDivider2 = vgui.Create("DPanel", panel)
     sectionDivider2:SetTall(2) -- Thin line
@@ -472,18 +481,17 @@ function TOOL.BuildCPanel(panel)
     sectionDivider2:DockMargin(0, 5, 0, 5)
     panel:AddItem(sectionDivider2)
 
-    local clientLabel = vgui.Create("DLabel", panel)
-    clientLabel:SetFont("DermaDefaultBold")
-    clientLabel:SetText("Client Settings")
-    clientLabel:SetTextColor(Color(21, 172, 139))
-    clientLabel:Dock(TOP)
-    clientLabel:DockMargin(0, 5, 0, 5)
-    clientLabel:SetContentAlignment(4)
-    panel:AddItem(clientLabel)
+    local clientSettingsForm = vgui.Create("DForm", panel)
+    clientSettingsForm:SetName("Client Settings")
+    
+    
+    clientSettingsForm:Dock(TOP)
+    clientSettingsForm:DockMargin(0, 5, 0, 5)
+    panel:AddItem(clientSettingsForm)
 
-    panel:CheckBox("Enable HUD", "ar_enable_hud")
-    panel:CheckBox("Enable Custom Placement Sounds", "ar_enable_sounds")
-    panel:CheckBox("Enable Film Grain Effect", "ar_enable_filmgrain")
+    clientSettingsForm:CheckBox("Enable HUD", "ar_enable_hud")
+    clientSettingsForm:CheckBox("Enable Custom Placement Sounds", "ar_enable_sounds")
+    clientSettingsForm:CheckBox("Enable Film Grain Effect", "ar_enable_filmgrain")
 
 end
 
