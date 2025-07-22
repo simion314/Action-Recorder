@@ -309,7 +309,7 @@ function TOOL:RightClick(trace)
     end
 
     for _, ent in pairs(ents.FindByClass("action_playback_box")) do
-        if IsValid(ent) and ent:GetOwner() == ply and ent.NumpadKey == key and ent:GetNWString("BoxID", "") ~= boxid then
+        if IsValid(ent) and ent:GetOwner() == ply and ent.NumpadKey == key and key ~= 0 and ent:GetNWString("BoxID", "") ~= boxid then
             net.Start("ActionRecorderNotify")
             net.WriteString("Keybind already used by another one of your boxes!")
             net.WriteInt(1, 1)
