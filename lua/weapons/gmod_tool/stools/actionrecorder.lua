@@ -308,6 +308,16 @@ function TOOL:RightClick(trace)
         easing_offset = ply:GetInfoNum("actionrecorder_easing_offset", 0)
     end
 
+    for _, ent in pairs(ents.FindByClass("action_playback_box")) do
+        if IsValid(ent) and ent:GetOwner() == ply and ent.NumpadKey == key and ent:GetNWString("BoxID", "") ~= boxid then
+            net.Start("ActionRecorderNotify")
+            net.WriteString("Keybind already used by another one of your boxes!")
+            net.WriteInt(1, 1)
+            net.Send(ply)
+            return false
+        end
+    end
+
     local found_box_owned = nil
     for _, ent in pairs(ents.FindByClass("action_playback_box")) do
         local entBoxID = ent.GetNWString and ent:GetNWString("BoxID", "") or (ent.BoxID or "")
@@ -328,7 +338,7 @@ function TOOL:RightClick(trace)
     if found_box_owned then
         found_box_owned:UpdateSettings(speed, loop, playbackType, model, boxid, soundpath, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset)
         found_box_owned.NumpadKey = key
-        if SERVER then found_box_owned:SetupNumpad() end
+        found_box_owned:SetupNumpad()
         net.Start("ActionRecorderNotify")
         net.WriteString("Playback box with BoxID '" .. boxid .. "' updated with new settings!")
         net.WriteInt(3, 3) 
@@ -357,7 +367,7 @@ function TOOL:RightClick(trace)
     ent:SetOwnerName(ply:Nick() or "Unknown")
     ent.NumpadKey = key
     ent:SetSoundPath(soundpath)
-    if SERVER then ent:SetupNumpad() end
+    ent:SetupNumpad()
 
     undo.Create("Action Playback Box")
         undo.AddEntity(ent)
@@ -373,6 +383,7 @@ function TOOL:RightClick(trace)
 
     return true
 end
+
 
 
 

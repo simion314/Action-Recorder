@@ -49,7 +49,8 @@ function ENT:Initialize()
 end
 
 function ENT:SetupNumpad()
-    if not self.NumpadKey then return end
+    if not IsValid(self:GetOwner()) or not self.NumpadKey then return end
+
     if self.NumpadBind then
         numpad.Remove(self.NumpadBind)
         self.NumpadBind = nil
@@ -58,9 +59,11 @@ function ENT:SetupNumpad()
         numpad.Remove(self.NumpadUpBind)
         self.NumpadUpBind = nil
     end
+
     self.NumpadBind = numpad.OnDown(self:GetOwner(), self.NumpadKey, "ActionRecorder_Playback", self)
     self.NumpadUpBind = numpad.OnUp(self:GetOwner(), self.NumpadKey, "ActionRecorder_Playback_Release", self)
 end
+
 
 function ENT:OnRemove()
     if self.PlaybackTimers then
@@ -128,8 +131,10 @@ function ENT:UpdateSettings(
     self:SetModelPath(model)
     self:SetBoxID(boxid)
     self:SetSoundPath(soundpath)
+    self:SetupNumpad() 
     self:StartPlayback()
 end
+
 
 
 function ENT:Use(activator, caller)
@@ -138,13 +143,26 @@ function ENT:Use(activator, caller)
     self:StartPlayback(false)
 end
 
-
+local function IsPropControlledByOtherBox(prop, myBox)
+    for _, box in pairs(ents.FindByClass("action_playback_box")) do
+        if IsValid(box) and box ~= myBox and box.IsPlayingBack and istable(box.PlaybackData) and box.BoxID ~= myBox.BoxID then
+            for k, _ in pairs(box.PlaybackData) do
+                if k == prop:EntIndex() then
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
 
 function ENT:StopPlayback(forceReturn)
     if not self.IsPlayingBack and not forceReturn then return end
     if not self.PlaybackTimers then return end
     for _, oldTimerName in pairs(self.PlaybackTimers) do
-        if oldTimerName then timer.Remove(oldTimerName) end
+        if oldTimerName then 
+            timer.Remove(oldTimerName) 
+        end
     end
     self.PlaybackTimers = {}
     self.IsPlayingBack = false
@@ -170,16 +188,14 @@ function ENT:StopPlayback(forceReturn)
 end
 
 
+
+
+
+
+
+
 function ENT:StartPlayback()
     if self.IsPlayingBack then return end
-
-    -- NEW: Stop any other boxes controlling our props
-    for entIndex, _ in pairs(self.PlaybackData or {}) do
-        local ent = Entity(entIndex)
-        if IsValid(ent) and IsValid(ent.PlaybackBox) and ent.PlaybackBox ~= self then
-            ent.PlaybackBox:StopPlayback()
-        end
-    end
 
     -- Capture initial positions/angles when playback starts
     if not self.IsPlayingBack then -- Only capture if not already playing
@@ -208,13 +224,14 @@ function ENT:StartPlayback()
     for entIndex, frames in pairs(self.PlaybackData or {}) do
         local ent = Entity(entIndex)
         if not IsValid(ent) then continue end
-        
+        if IsPropControlledByOtherBox(ent, self) then continue end
         local phys = ent:GetPhysicsObject()
         if not IsValid(phys) then continue end
 
         local frameCount = #frames
         if frameCount == 0 then continue end
 
+        phys:EnableMotion(true)
         ent:SetCollisionGroup(COLLISION_GROUP_NONE)
 
         local i = (self.PlaybackSpeed < 0) and frameCount or 1
@@ -222,36 +239,16 @@ function ENT:StartPlayback()
         local timerName = "Playback_" .. self:EntIndex() .. "_" .. entIndex .. "_" .. self.PlaybackCounter
         self.PlaybackTimers[entIndex] = timerName
 
-        -- Find the first frame with positional data to initialize the playback
-        local firstValidFrame = nil
-        for j = 1, frameCount do
-            if frames[j] and frames[j].pos and frames[j].ang then
-                firstValidFrame = frames[j]
-                break
-            end
-        end
-
-        -- If no frame has position data, we can't play anything back for this entity.
-        if not firstValidFrame then continue end
-
-        local basePos = (self.PlaybackType == "relative") and (ent:GetPos() - firstValidFrame.pos) or Vector(0,0,0)
+        local basePos = (self.PlaybackType == "relative" and frames[i] and frames[i].pos) and (ent:GetPos() - frames[i].pos) or Vector(0,0,0)
 
         if ent.IsBeingPlayedBack and ent.PlaybackBox and ent.PlaybackBox ~= self then
             ent.IsBeingPlayedBack = false
             ent.PlaybackBox = nil
         end
 
-        -- Initialize target to the prop's current state to prevent movement until the timer ticks.
-        ent.TargetPos = ent:GetPos()
-        ent.TargetAng = ent:GetAngles()
-
-        -- Immediately apply the state of the *actual* first frame
-        local firstFrame = frames[1]
-        if firstFrame and firstFrame.frozen ~= nil then
-            local phys = ent:GetPhysicsObject()
-            if IsValid(phys) then
-                phys:EnableMotion(not firstFrame.frozen)
-            end
+        if frames[i].pos and frames[i].ang then
+            ent.TargetPos = frames[i].pos + basePos
+            ent.TargetAng = frames[i].ang
         end
 
         ent.LastFrameTime = CurTime()
@@ -301,18 +298,18 @@ function ENT:StartPlayback()
                 if self.LoopMode == 1 then -- Loop
                     i = (self.PlaybackSpeed < 0) and frameCount or 1
                     frame = frames[i]
-                    basePos = (self.PlaybackType == "relative" and frame and frame.pos) and (ent:GetPos() - frame.pos) or Vector(0,0,0)
+                    basePos = (frame and frame.pos and self.PlaybackType == "relative") and (ent:GetPos() - frame.pos) or Vector(0,0,0)
                 elseif self.LoopMode == 2 then -- Ping-Pong
                     self.PlaybackDirection = self.PlaybackDirection * -1
                     i = i + (self.PlaybackDirection * (self.PlaybackSpeed < 0 and -1 or 1) * 2)
                     frame = frames[i]
-                    basePos = (self.PlaybackType == "relative" and frame and frame.pos) and (ent:GetPos() - frame.pos) or Vector(0,0,0)
+                    basePos = (frame and frame.pos and self.PlaybackType == "relative") and (ent:GetPos() - frame.pos) or Vector(0,0,0)
                 elseif self.LoopMode == 3 then -- No Loop (Smooth)
                     if self.PlaybackDirection == 1 then -- Finished forward playback, start reverse
                         self.PlaybackDirection = -1
                         i = frameCount -- Start from the end for reverse
                         frame = frames[i]
-                        basePos = (self.PlaybackType == "relative" and frame and frame.pos) and (ent:GetPos() - frame.pos) or Vector(0,0,0)
+                        basePos = (frame and frame.pos and self.PlaybackType == "relative") and (ent:GetPos() - frame.pos) or Vector(0,0,0)
                     else -- Finished reverse playback
                         timer.Remove(timerName)
                         if self.PlaybackTimers then self.PlaybackTimers[entIndex] = nil end
@@ -327,7 +324,7 @@ function ENT:StartPlayback()
                         local allDone = true
                         if self.PlaybackTimers then
                             for _, v in pairs(self.PlaybackTimers) do
-                                if v then allDone = false; break end
+                                if v then allDone = false break end
                             end
                         end
                         if allDone then
@@ -351,12 +348,10 @@ function ENT:StartPlayback()
                     local allDone = true
                     if self.PlaybackTimers then
                         for _, v in pairs(self.PlaybackTimers) do
-                            if v then allDone = false; break end
+                            if v then allDone = false break end
                         end
                     end
-                    if allDone then
-                        self.IsPlayingBack = false
-                    end
+                    if allDone then self.IsPlayingBack = false end
                     return
                 end
             end
@@ -375,32 +370,18 @@ function ENT:StartPlayback()
                 local allDone = true
                 if self.PlaybackTimers then
                     for _, v in pairs(self.PlaybackTimers) do
-                        if v then allDone = false; break end
+                        if v then allDone = false break end
                     end
                 end
                 if allDone then self.IsPlayingBack = false end
                 return
             end
 
-            if frame.frozen ~= nil then
-                local phys = ent:GetPhysicsObject()
-                if IsValid(phys) then
-                    phys:EnableMotion(not frame.frozen)
-                end
-            end
-            
             if frame.pos and frame.ang then
-                local phys = ent:GetPhysicsObject()
-                if IsValid(phys) then
-                    if not phys:IsMoveable() then
-                        phys:EnableMotion(true)
-                        phys:Wake()
-                    end
-                end
                 ent.TargetPos = frame.pos + basePos
                 ent.TargetAng = frame.ang
             end
-            
+
             if frame.material then ent:SetMaterial(frame.material) end
             if frame.color then ent:SetColor(frame.color) end
             if frame.renderfx then ent:SetRenderFX(frame.renderfx) end
@@ -420,6 +401,10 @@ function ENT:StartPlayback()
         end)
     end
 end
+
+
+
+
 
 
 if CLIENT then
@@ -551,6 +536,19 @@ hook.Add("Think", "ActionRecorder_PlaybackThink", function()
         end
     end
 end)
+
+hook.Add("PhysgunFreeze", "ActionRecorder_MarkPhysgunFreeze", function(wep, phys, ent, ply)
+    if IsValid(ent) then
+        ent.ActionRecorder_PhysgunFrozen = true
+    end
+end)
+
+hook.Add("PhysgunUnfreeze", "ActionRecorder_MarkPhysgunUnfreeze", function(wep, phys, ent, ply)
+    if IsValid(ent) then
+        ent.ActionRecorder_PhysgunFrozen = false
+    end
+end)
+
 
 if SERVER then
     numpad.Register("ActionRecorder_Playback", function(ply, ent)
