@@ -58,6 +58,12 @@ local function StopPropRecording(ply, prop)
     if not IsValid(prop) then return end
     prop.ActionRecorder_Recording = false
     timer.Remove("ActionRecorder_Prop_"..(IsValid(ply) and ply:EntIndex() or 0).."_"..prop:EntIndex())
+
+    local phys = prop:GetPhysicsObject()
+    if IsValid(phys) and prop.ActionRecorder_WasFrozen then
+        phys:EnableMotion(false)
+    end
+    prop.ActionRecorder_WasFrozen = nil
 end
 
 local function IsPropControlledByOtherBox(prop, myBoxID)
@@ -72,6 +78,14 @@ local function StartPropRecording(ply, prop, boxid)
     ply.ActionRecordData[id] = {}
     prop.ActionRecorder_Recording = true
     local timerName = "ActionRecorder_Prop_"..ply:EntIndex().."_"..id
+
+    local phys = prop:GetPhysicsObject()
+    if IsValid(phys) and phys:IsMoveable() == false then
+        table.insert(ply.ActionRecordData[id], {
+            frozen = true,
+            time = CurTime()
+        })
+    end
 
     timer.Create(timerName, 0.02, 0, function()
         if not IsValid(prop) or not IsValid(ply) or not ply.ActionRecorderEnabled or not ply.ActionRecordData then
@@ -150,6 +164,30 @@ hook.Add("Think", "ActionRecorder_Think", function()
                     end
                 end
             end
+        end
+    end
+end)
+
+hook.Add("PhysgunFreeze", "ActionRecorder_PhysgunFreeze", function(wep, phys, ent, ply)
+    if ply.ActionRecorderEnabled and IsValid(ent) and ent:GetCreator() == ply then
+        local id = ent:EntIndex()
+        if ply.ActionRecordData and ply.ActionRecordData[id] then
+            table.insert(ply.ActionRecordData[id], {
+                frozen = true,
+                time = CurTime()
+            })
+        end
+    end
+end)
+
+hook.Add("PhysgunUnfreeze", "ActionRecorder_PhysgunUnfreeze", function(wep, phys, ent, ply)
+    if ply.ActionRecorderEnabled and IsValid(ent) and ent:GetCreator() == ply then
+        local id = ent:EntIndex()
+        if ply.ActionRecordData and ply.ActionRecordData[id] then
+            table.insert(ply.ActionRecordData[id], {
+                frozen = false,
+                time = CurTime()
+            })
         end
     end
 end)
