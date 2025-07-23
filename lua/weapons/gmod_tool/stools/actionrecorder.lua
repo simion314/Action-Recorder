@@ -11,6 +11,7 @@ end
 if SERVER then
     CreateConVar("actionrecorder_playbackspeed", "1", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
     CreateConVar("actionrecorder_loop", "0", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
+	CreateConVar("actionrecorder_freezeonend", "0", {FCVAR_ARCHIVE, FCVAR_REPLICATED})
     CreateConVar("actionrecorder_playbacktype", "absolute", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
     CreateConVar("actionrecorder_model", "models/dav0r/camera.mdl", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
     CreateConVar("actionrecorder_boxid", "Box", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
@@ -24,6 +25,7 @@ if SERVER then
 else
     CreateClientConVar("actionrecorder_playbackspeed", "1", true, true)
     CreateClientConVar("actionrecorder_loop", "0", true, true)
+	CreateClientConVar("actionrecorder_freezeonend", "0", true, true)
     CreateClientConVar("actionrecorder_playbacktype", "absolute", true, true)
     CreateClientConVar("actionrecorder_model", "models/dav0r/camera.mdl", true, true)
     CreateClientConVar("actionrecorder_boxid", "Box", true, true)
@@ -39,10 +41,10 @@ end
 
 if SERVER then
     util.AddNetworkString("ActionRecorder_PlayStartSound")
-	util.AddNetworkString("ActionRecorder_PlayLoopSound")
+    util.AddNetworkString("ActionRecorder_PlayLoopSound")
     util.AddNetworkString("ActionRecorder_PlayStopSound")
-	util.AddNetworkString("ActionRecorder_StopLoopSound")
-	util.AddNetworkString("ActionRecorderNotify")
+    util.AddNetworkString("ActionRecorder_StopLoopSound")
+    util.AddNetworkString("ActionRecorderNotify")
     util.AddNetworkString("ActionRecorder_FlashEffect")
 end
 
@@ -168,29 +170,7 @@ hook.Add("Think", "ActionRecorder_Think", function()
     end
 end)
 
-hook.Add("PhysgunFreeze", "ActionRecorder_PhysgunFreeze", function(wep, phys, ent, ply)
-    if ply.ActionRecorderEnabled and IsValid(ent) and ent:GetCreator() == ply then
-        local id = ent:EntIndex()
-        if ply.ActionRecordData and ply.ActionRecordData[id] then
-            table.insert(ply.ActionRecordData[id], {
-                frozen = true,
-                time = CurTime()
-            })
-        end
-    end
-end)
 
-hook.Add("PhysgunUnfreeze", "ActionRecorder_PhysgunUnfreeze", function(wep, phys, ent, ply)
-    if ply.ActionRecorderEnabled and IsValid(ent) and ent:GetCreator() == ply then
-        local id = ent:EntIndex()
-        if ply.ActionRecordData and ply.ActionRecordData[id] then
-            table.insert(ply.ActionRecordData[id], {
-                frozen = false,
-                time = CurTime()
-            })
-        end
-    end
-end)
 
 function TOOL:LeftClick(trace)
     if SERVER then
@@ -278,7 +258,9 @@ function TOOL:RightClick(trace)
 
     local ply = self:GetOwner()
     local globalMode = GetConVar("actionrecorder_globalmode"):GetBool()
-    local speed, loop, playbackType, model, boxid, key, soundpath, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset
+    local speed, loop, playbackType, model, boxid, key, soundpath
+    local easing, easing_amplitude, easing_frequency, easing_invert, easing_offset
+    local physicsless, freezeonend
 
     if globalMode and ply:IsAdmin() then
         speed = tonumber(GetConVar("actionrecorder_playbackspeed"):GetString()) or 1
@@ -293,6 +275,8 @@ function TOOL:RightClick(trace)
         easing_frequency = GetConVar("actionrecorder_easing_frequency"):GetFloat()
         easing_invert = GetConVar("actionrecorder_easing_invert"):GetBool()
         easing_offset = GetConVar("actionrecorder_easing_offset"):GetFloat()
+        physicsless = GetConVar("ar_physicsless_teleport"):GetBool()
+        freezeonend = GetConVar("actionrecorder_freezeonend"):GetBool()
     else
         speed = ply:GetInfoNum("actionrecorder_playbackspeed", 1)
         loop = ply:GetInfoNum("actionrecorder_loop", 0)
@@ -306,6 +290,8 @@ function TOOL:RightClick(trace)
         easing_frequency = ply:GetInfoNum("actionrecorder_easing_frequency", 1)
         easing_invert = ply:GetInfoNum("actionrecorder_easing_invert", 0) == 1
         easing_offset = ply:GetInfoNum("actionrecorder_easing_offset", 0)
+        physicsless = ply:GetInfoNum("ar_physicsless_teleport", 0) == 1
+        freezeonend = ply:GetInfoNum("actionrecorder_freezeonend", 0) == 1 
     end
 
     for _, ent in pairs(ents.FindByClass("action_playback_box")) do
@@ -336,12 +322,19 @@ function TOOL:RightClick(trace)
     end
 
     if found_box_owned then
-        found_box_owned:UpdateSettings(speed, loop, playbackType, model, boxid, soundpath, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset)
+        found_box_owned:UpdateSettings(
+            speed, loop, playbackType, model, boxid, soundpath,
+            easing, easing_amplitude, easing_frequency, easing_invert, easing_offset,
+            physicsless, freezeonend
+        )
         found_box_owned.NumpadKey = key
+        found_box_owned:SetPhysicslessTeleport(physicsless)
+        found_box_owned:SetNWBool("FreezeOnEnd", freezeonend) 
         found_box_owned:SetupNumpad()
+
         net.Start("ActionRecorderNotify")
         net.WriteString("Playback box with BoxID '" .. boxid .. "' updated with new settings!")
-        net.WriteInt(3, 3) 
+        net.WriteInt(3, 3)
         net.Send(ply)
         return true
     end
@@ -360,13 +353,18 @@ function TOOL:RightClick(trace)
     ent:SetPos(trace.HitPos + Vector(0, 0, 10))
     ent:Spawn()
     ent:SetPlaybackData(ply.ActionRecordData)
-    ent:SetPlaybackSettings(speed, loop, playbackType, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset)
+    ent:SetPlaybackSettings(
+        speed, loop, playbackType,
+        easing, easing_amplitude, easing_frequency, easing_invert, easing_offset, physicsless, freezeonend
+    )
     ent:SetModelPath(model)
     ent:SetBoxID(boxid)
     ent:SetOwner(ply)
     ent:SetOwnerName(ply:Nick() or "Unknown")
     ent.NumpadKey = key
     ent:SetSoundPath(soundpath)
+    ent:SetPhysicslessTeleport(physicsless)
+    ent:SetNWBool("FreezeOnEnd", freezeonend)
     ent:SetupNumpad()
 
     undo.Create("Action Playback Box")
@@ -383,6 +381,7 @@ function TOOL:RightClick(trace)
 
     return true
 end
+
 
 
 
@@ -496,6 +495,7 @@ function TOOL.BuildCPanel(panel)
     generalSettingsForm:TextEntry("Model", "actionrecorder_model")
     generalSettingsForm:TextEntry("Playback Box ID", "actionrecorder_boxid")
     generalSettingsForm:TextEntry("Activation Sound", "actionrecorder_soundpath")
+	generalSettingsForm:CheckBox("Freeze End(NO LOOP Only)", "actionrecorder_freezeonend")
     generalSettingsForm:CheckBox("Physicsless Teleport", "ar_physicsless_teleport")
     local keyBinder = vgui.Create("DBinder")
     keyBinder:SetConVar("actionrecorder_key")
@@ -569,6 +569,8 @@ function TOOL:GetSetConVars(ply)
         "actionrecorder_playbackspeed",
         "actionrecorder_loop",
         "actionrecorder_playbacktype",
+		"actionrecorder_freezeonend",
+		"ar_physicsless_teleport",
         "actionrecorder_model",
         "actionrecorder_boxid",
         "actionrecorder_key",

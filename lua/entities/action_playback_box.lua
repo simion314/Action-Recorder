@@ -12,7 +12,7 @@ function ENT:Initialize()
     if SERVER then
         self:SetUseType(SIMPLE_USE)
     end
-    self.PlaybackData = {}
+    self.PlaybackData = {} 
     self.PlaybackTimers = {}
     self.PlaybackSpeed = 1
     self.LoopMode = 0
@@ -29,11 +29,11 @@ function ENT:Initialize()
     self.BoxID = "Box"
     self.NumpadKey = self.NumpadKey or 5
     self.IsOneTimeSmoothReturn = false
-    
     self.IsActivated = false
     self.InitialPositions = {}
     self.InitialAngles = {}
     self.ShouldSmoothReturn = false
+    self.PhysicslessTeleport = false
 
     if SERVER and not self:GetNWString("OwnerName", nil) then
         self:SetNWString("OwnerName", "Unknown")
@@ -119,18 +119,28 @@ function ENT:SetSoundPath(soundpath)
     self.SoundPath = soundpath
 end
 
+function ENT:SetPhysicslessTeleport(state)
+    self.PhysicslessTeleport = tobool(state)
+    if SERVER then
+        self:SetNWBool("PhysicslessTeleport", self.PhysicslessTeleport)
+    end
+end
+
+
 function ENT:UpdateSettings(
     speed, loopMode, playbackType, model, boxid, soundpath,
-    easing, easing_amplitude, easing_frequency, easing_invert, easing_offset
+    easing, easing_amplitude, easing_frequency, easing_invert, easing_offset, physicsless, freezeonend
 )
     self:StopPlayback()
     self:SetPlaybackSettings(
         speed, loopMode, playbackType,
-        easing, easing_amplitude, easing_frequency, easing_invert, easing_offset
+        easing, easing_amplitude, easing_frequency, easing_invert, easing_offset, physicsless
     )
     self:SetModelPath(model)
     self:SetBoxID(boxid)
     self:SetSoundPath(soundpath)
+    self:SetPhysicslessTeleport(physicsless)
+	self:SetNWBool("FreezeOnEnd", freezeonend)
     self:SetupNumpad() 
     self:StartPlayback()
 end
@@ -159,16 +169,23 @@ end
 function ENT:StopPlayback(forceReturn)
     if not self.IsPlayingBack and not forceReturn then return end
     if not self.PlaybackTimers then return end
+
+    
     for _, oldTimerName in pairs(self.PlaybackTimers) do
         if oldTimerName then 
             timer.Remove(oldTimerName) 
         end
     end
+
     self.PlaybackTimers = {}
     self.IsPlayingBack = false
     self.IsActivated = false
 
-    if self.LoopMode == 0 or self.LoopMode == 3 then
+    
+    local freezeOnEnd = self:GetNWBool("FreezeOnEnd", false)
+
+    
+    if freezeOnEnd and (self.LoopMode == 0 or self.LoopMode == 3) then
         for entIndex, _ in pairs(self.PlaybackData or {}) do
             local ent = Entity(entIndex)
             if IsValid(ent) then
@@ -179,12 +196,6 @@ function ENT:StopPlayback(forceReturn)
             end
         end
     end
-
-    if self.LoopMode == 3 then -- No Loop (Smooth)
-        self.PlaybackDirection = -1 -- Set direction to reverse for smooth return
-        self.IsOneTimeSmoothReturn = true
-        self:StartPlayback(true)
-    end
 end
 
 
@@ -192,10 +203,9 @@ end
 
 
 
-
-
 function ENT:StartPlayback()
-    if self.IsPlayingBack then return end
+
+
 
     -- Capture initial positions/angles when playback starts
     if not self.IsPlayingBack then -- Only capture if not already playing
@@ -218,20 +228,26 @@ function ENT:StartPlayback()
     self.PlaybackCounter = (self.PlaybackCounter or 0) + 1
     self.IsPlayingBack = true
     self.PlaybackDirection = 1
-    
+
     self.IsActivated = true
+
+    local freezeOnEnd = self:GetNWBool("FreezeOnEnd", false) 
 
     for entIndex, frames in pairs(self.PlaybackData or {}) do
         local ent = Entity(entIndex)
         if not IsValid(ent) then continue end
-        if IsPropControlledByOtherBox(ent, self) then continue end
+        --if IsPropControlledByOtherBox(ent, self) then continue end -- This is only for replaying one box at a time.
         local phys = ent:GetPhysicsObject()
         if not IsValid(phys) then continue end
 
         local frameCount = #frames
         if frameCount == 0 then continue end
 
-        phys:EnableMotion(true)
+        
+        if not (freezeOnEnd and (self.LoopMode == 0 or self.LoopMode == 3)) then
+            phys:EnableMotion(true)
+        end
+
         ent:SetCollisionGroup(COLLISION_GROUP_NONE)
 
         local i = (self.PlaybackSpeed < 0) and frameCount or 1
@@ -246,9 +262,13 @@ function ENT:StartPlayback()
             ent.PlaybackBox = nil
         end
 
+        
         if frames[i].pos and frames[i].ang then
             ent.TargetPos = frames[i].pos + basePos
             ent.TargetAng = frames[i].ang
+        else
+            ent.TargetPos = ent:GetPos()
+            ent.TargetAng = ent:GetAngles()
         end
 
         ent.LastFrameTime = CurTime()
@@ -267,12 +287,6 @@ function ENT:StartPlayback()
                 if ent then
                     ent.IsBeingPlayedBack = false
                     ent.PlaybackBox = nil
-                    if self and (self.LoopMode == 0 or self.LoopMode == 3) then
-                        local phys = ent:GetPhysicsObject()
-                        if IsValid(phys) then
-                            phys:EnableMotion(false)
-                        end
-                    end
                 end
                 return
             end
@@ -283,12 +297,6 @@ function ENT:StartPlayback()
                 if ent then
                     ent.IsBeingPlayedBack = false
                     ent.PlaybackBox = nil
-                    if self and (self.LoopMode == 0 or self.LoopMode == 3) then
-                        local phys = ent:GetPhysicsObject()
-                        if IsValid(phys) then
-                            phys:EnableMotion(false)
-                        end
-                    end
                 end
                 return
             end
@@ -315,12 +323,6 @@ function ENT:StartPlayback()
                         if self.PlaybackTimers then self.PlaybackTimers[entIndex] = nil end
                         ent.IsBeingPlayedBack = false
                         ent.PlaybackBox = nil
-                        if self.LoopMode == 0 or self.LoopMode == 3 then
-                            local phys = ent:GetPhysicsObject()
-                            if IsValid(phys) then
-                                phys:EnableMotion(false)
-                            end
-                        end
                         local allDone = true
                         if self.PlaybackTimers then
                             for _, v in pairs(self.PlaybackTimers) do
@@ -339,12 +341,6 @@ function ENT:StartPlayback()
                     if self.PlaybackTimers then self.PlaybackTimers[entIndex] = nil end
                     ent.IsBeingPlayedBack = false
                     ent.PlaybackBox = nil
-                    if self.LoopMode == 0 or self.LoopMode == 3 then
-                        local phys = ent:GetPhysicsObject()
-                        if IsValid(phys) then
-                            phys:EnableMotion(false)
-                        end
-                    end
                     local allDone = true
                     if self.PlaybackTimers then
                         for _, v in pairs(self.PlaybackTimers) do
@@ -361,12 +357,6 @@ function ENT:StartPlayback()
                 if self.PlaybackTimers then self.PlaybackTimers[entIndex] = nil end
                 ent.IsBeingPlayedBack = false
                 ent.PlaybackBox = nil
-                if self.LoopMode == 0 or self.LoopMode == 3 then
-                    local phys = ent:GetPhysicsObject()
-                    if IsValid(phys) then
-                        phys:EnableMotion(false)
-                    end
-                end
                 local allDone = true
                 if self.PlaybackTimers then
                     for _, v in pairs(self.PlaybackTimers) do
@@ -380,6 +370,9 @@ function ENT:StartPlayback()
             if frame.pos and frame.ang then
                 ent.TargetPos = frame.pos + basePos
                 ent.TargetAng = frame.ang
+            else
+                ent.TargetPos = ent:GetPos()
+                ent.TargetAng = ent:GetAngles()
             end
 
             if frame.material then ent:SetMaterial(frame.material) end
@@ -401,6 +394,9 @@ function ENT:StartPlayback()
         end)
     end
 end
+
+
+
 
 
 
@@ -467,7 +463,7 @@ hook.Add("Think", "ActionRecorder_PlaybackThink", function()
                     maxspeeddamp = 10000,
                     maxangulardamp = 10000,
                     dampfactor = 1,
-                    teleportdistance = GetConVar("ar_physicsless_teleport"):GetBool() and 0.1 or 0,
+                    teleportdistance = ent.PlaybackBox and ent.PlaybackBox.PhysicslessTeleport and 0.1 or 0,
                     deltaTime = FrameTime()
                 }
                 phys:Wake()
@@ -522,7 +518,7 @@ hook.Add("Think", "ActionRecorder_PlaybackThink", function()
                         maxspeeddamp = 10000,
                         maxangulardamp = 10000,
                         dampfactor = 1,
-                        teleportdistance = 0.1, -- Small non-zero value to prevent jittering
+                        teleportdistance = playbackBox and playbackBox.PhysicslessTeleport and 0.1 or 0,
                         deltaTime = FrameTime()
                     }
                     phys:Wake()
@@ -537,17 +533,7 @@ hook.Add("Think", "ActionRecorder_PlaybackThink", function()
     end
 end)
 
-hook.Add("PhysgunFreeze", "ActionRecorder_MarkPhysgunFreeze", function(wep, phys, ent, ply)
-    if IsValid(ent) then
-        ent.ActionRecorder_PhysgunFrozen = true
-    end
-end)
 
-hook.Add("PhysgunUnfreeze", "ActionRecorder_MarkPhysgunUnfreeze", function(wep, phys, ent, ply)
-    if IsValid(ent) then
-        ent.ActionRecorder_PhysgunFrozen = false
-    end
-end)
 
 
 if SERVER then
@@ -599,3 +585,4 @@ function ENT:Think()
     self:NextThink(CurTime())
     return true
 end
+
