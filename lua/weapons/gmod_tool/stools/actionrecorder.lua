@@ -45,6 +45,7 @@ if SERVER then
     util.AddNetworkString("ActionRecorder_PlayStopSound")
     util.AddNetworkString("ActionRecorder_StopLoopSound")
     util.AddNetworkString("ActionRecorderNotify")
+    util.AddNetworkString("ActionRecorder_ToggleRecording")
     util.AddNetworkString("ActionRecorder_FlashEffect")
 end
 
@@ -106,6 +107,8 @@ local function StartPropRecording(ply, prop, boxid)
             color = prop:GetColor(),
             renderfx = prop:GetRenderFX(),
             rendermode = prop:GetRenderMode(),
+            collisiongroup = prop:GetCollisionGroup(),
+            solid = prop:GetSolid(),
             skin = prop:GetSkin(),
             bodygroups = (function()
                 local t = {}
@@ -124,6 +127,10 @@ local function StartPropRecording(ply, prop, boxid)
             or last.renderfx ~= cur.renderfx then
             changed = true
         elseif last.color and cur.color and (last.color.r ~= cur.color.r or last.color.g ~= cur.color.g or last.color.b ~= cur.color.b or last.color.a ~= cur.color.a) then
+            changed = true
+        elseif last.collisiongroup != cur.collisiongroup then
+            changed = true
+        elseif last.solid != cur.solid then
             changed = true
         else
             for id, val in pairs(cur.bodygroups) do
@@ -211,9 +218,9 @@ function TOOL:LeftClick(trace)
                 end
             end
 
-            umsg.Start("ActionRecorder_ToggleRecording", ply)
-            umsg.Bool(true)
-            umsg.End()
+            net.Start("ActionRecorder_ToggleRecording")
+            net.WriteBool(true)
+            net.Send(ply)
 
             if GetConVar("ar_enable_filmgrain"):GetBool() then
                 net.Start("ActionRecorder_FlashEffect")
@@ -237,9 +244,9 @@ function TOOL:LeftClick(trace)
             net.WriteInt(3, 3)
             net.Send(ply)
 
-            umsg.Start("ActionRecorder_ToggleRecording", ply)
-            umsg.Bool(false)
-            umsg.End()
+            net.Start("ActionRecorder_ToggleRecording")
+            net.WriteBool(false)
+            net.Send(ply)
         end
     end
 
@@ -394,8 +401,8 @@ if CLIENT then
 
     local isRecording = false
 
-    usermessage.Hook("ActionRecorder_ToggleRecording", function(um)
-        isRecording = um:ReadBool()
+    net.Receive("ActionRecorder_ToggleRecording", function(um)
+        isRecording = net.ReadBool()
     end)
 
     hook.Add("HUDPaint", "ActionRecorder_HUDPaint", function()
