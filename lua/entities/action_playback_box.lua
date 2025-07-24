@@ -181,32 +181,54 @@ function ENT:StopPlayback(forceReturn)
     self.IsPlayingBack = false
     self.IsActivated = false
 
-    
-    local freezeOnEnd = self:GetNWBool("FreezeOnEnd", false)
+    -- This isn't perfect but it is a fine fix for something that
+    -- will only be used with wiremod. May cause some issues.
 
-    
-    if freezeOnEnd and (self.LoopMode == 0 or self.LoopMode == 3) then
-        for entIndex, _ in pairs(self.PlaybackData or {}) do
-            local ent = Entity(entIndex)
-            if IsValid(ent) then
-                local phys = ent:GetPhysicsObject()
-                if IsValid(phys) then
-                    phys:EnableMotion(false)
-                end
-            end
-        end
+    -- TODO: Entire project moved to system with per frame indexing (frame[1].idx)
+
+    for entIndex, frame in pairs(self.PlaybackData or {}) do
+        self:FinishPhysics(entIndex, frame)
     end
+end
+
+function ENT:FinishPhysics(entIndex, lastFrame)
+    local target = Entity(entIndex)
+
+    if (not IsValid(target)) then
+        return
+    end
+
+    target:SetCollisionGroup(lastFrame.collisiongroup)
+    target:SetSolid(lastFrame.solid)
+
+    local sObj = self
+
+    timer.Simple(0, function()
+        if (not IsValid(target) or not IsValid(sObj)) then
+            return
+        end
+
+        local physObj = target:GetPhysicsObject()
+
+        if (not IsValid(physObj)) then
+            return
+        end
+
+        if (sObj:GetNWBool("FreezeOnEnd", false)) then 
+            physObj:EnableMotion(false)
+            physObj:Sleep()
+        else
+            physObj:EnableMotion(true)
+            physObj:Wake()
+        end
+    end)
 end
 
 
 
 
 
-
 function ENT:StartPlayback()
-
-
-
     -- Capture initial positions/angles when playback starts
     if not self.IsPlayingBack then -- Only capture if not already playing
         self.InitialPositions = {}
@@ -216,6 +238,14 @@ function ENT:StartPlayback()
             if IsValid(ent) then
                 self.InitialPositions[entIndex] = ent:GetPos()
                 self.InitialAngles[entIndex] = ent:GetAngles()
+
+
+                local physObj = ent:GetPhysicsObject()
+
+                ent:SetSolid(SOLID_VPHYSICS)
+
+                physObj:EnableMotion(true)
+                physObj:Wake()
             end
         end
     end
@@ -243,7 +273,6 @@ function ENT:StartPlayback()
         local frameCount = #frames
         if frameCount == 0 then continue end
 
-        
         if not (freezeOnEnd and (self.LoopMode == 0 or self.LoopMode == 3)) then
             phys:EnableMotion(true)
         end
@@ -252,7 +281,7 @@ function ENT:StartPlayback()
 
         local i = (self.PlaybackSpeed < 0) and frameCount or 1
         self.i = i
-        local timerName = "Playback_" .. self:EntIndex() .. "_" .. entIndex .. "_" .. self.PlaybackCounter
+        local timerName = "Playback_" .. self.BoxID .. "_" .. entIndex .. "_" .. self.PlaybackCounter
         self.PlaybackTimers[entIndex] = timerName
 
         local basePos = (self.PlaybackType == "relative" and frames[i] and frames[i].pos) and (ent:GetPos() - frames[i].pos) or Vector(0,0,0)
@@ -391,6 +420,10 @@ function ENT:StartPlayback()
 
             i = i + (self.PlaybackDirection * (self.PlaybackSpeed < 0 and -1 or 1))
             self.i = i
+
+            if (i > frameCount) then 
+                self:FinishPhysics(entIndex, frame)
+            end
         end)
     end
 end
@@ -463,7 +496,7 @@ hook.Add("Think", "ActionRecorder_PlaybackThink", function()
                     maxspeeddamp = 10000,
                     maxangulardamp = 10000,
                     dampfactor = 1,
-                    teleportdistance = ent.PlaybackBox and ent.PlaybackBox.PhysicslessTeleport and 0.1 or 0,
+                    teleportdistance = ent.PlaybackBox and ent.PlaybackBox.PhysicslessTeleport and math.huge or 0,
                     deltaTime = FrameTime()
                 }
                 phys:Wake()
@@ -518,7 +551,7 @@ hook.Add("Think", "ActionRecorder_PlaybackThink", function()
                         maxspeeddamp = 10000,
                         maxangulardamp = 10000,
                         dampfactor = 1,
-                        teleportdistance = playbackBox and playbackBox.PhysicslessTeleport and 0.1 or 0,
+                        teleportdistance = playbackBox and playbackBox.PhysicslessTeleport and math.huge or 0,
                         deltaTime = FrameTime()
                     }
                     phys:Wake()
