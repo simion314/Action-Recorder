@@ -49,3 +49,15 @@ function AR.Tokenizer:New(ENT, Owner)
 
 	return Token
 end
+
+function AR.Tokenizer:Compare(Token, secondaryToken)
+	local Changes = { }
+	
+	for k,v in pairs(Token) do 
+		if (secondaryToken[k] != v) then
+			Changes[k] = v
+		end
+	end
+	
+	return table.Count(Changes), Changes
+end

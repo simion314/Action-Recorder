@@ -17,6 +17,7 @@ end
 include("config.lua")
 include("tokenizer.lua")
 include("cache.lua")
+include("pipeline.lua")
 include("capture.lua")
 include("replay.lua")
 
