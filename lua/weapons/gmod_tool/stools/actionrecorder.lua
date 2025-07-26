@@ -11,7 +11,6 @@ end
 if SERVER then
     CreateConVar("actionrecorder_playbackspeed", "1", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
     CreateConVar("actionrecorder_loop", "0", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
-	CreateConVar("actionrecorder_freezeonend", "0", {FCVAR_ARCHIVE, FCVAR_REPLICATED})
     CreateConVar("actionrecorder_playbacktype", "absolute", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
     CreateConVar("actionrecorder_model", "models/dav0r/camera.mdl", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
     CreateConVar("actionrecorder_boxid", "Box", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
@@ -25,7 +24,6 @@ if SERVER then
 else
     CreateClientConVar("actionrecorder_playbackspeed", "1", true, true)
     CreateClientConVar("actionrecorder_loop", "0", true, true)
-	CreateClientConVar("actionrecorder_freezeonend", "0", true, true)
     CreateClientConVar("actionrecorder_playbacktype", "absolute", true, true)
     CreateClientConVar("actionrecorder_model", "models/dav0r/camera.mdl", true, true)
     CreateClientConVar("actionrecorder_boxid", "Box", true, true)
@@ -41,10 +39,10 @@ end
 
 if SERVER then
     util.AddNetworkString("ActionRecorder_PlayStartSound")
-    util.AddNetworkString("ActionRecorder_PlayLoopSound")
+	util.AddNetworkString("ActionRecorder_PlayLoopSound")
     util.AddNetworkString("ActionRecorder_PlayStopSound")
-    util.AddNetworkString("ActionRecorder_StopLoopSound")
-    util.AddNetworkString("ActionRecorderNotify")
+	util.AddNetworkString("ActionRecorder_StopLoopSound")
+	util.AddNetworkString("ActionRecorderNotify")
     util.AddNetworkString("ActionRecorder_FlashEffect")
 end
 
@@ -57,22 +55,19 @@ local function anglesDifferent(a, b)
 end
 
 local function StopPropRecording(ply, prop)
+    AR_Log("StopPropRecording called for prop: ", prop:EntIndex())
     if not IsValid(prop) then return end
     prop.ActionRecorder_Recording = false
     timer.Remove("ActionRecorder_Prop_"..(IsValid(ply) and ply:EntIndex() or 0).."_"..prop:EntIndex())
-
-    local phys = prop:GetPhysicsObject()
-    if IsValid(phys) and prop.ActionRecorder_WasFrozen then
-        phys:EnableMotion(false)
-    end
-    prop.ActionRecorder_WasFrozen = nil
 end
 
 local function IsPropControlledByOtherBox(prop, myBoxID)
+    AR_Log("IsPropControlledByOtherBox called for prop: ", prop:EntIndex(), " with boxid: ", myBoxID)
     return ActionRecorder.ActivePlaybacks and ActionRecorder.ActivePlaybacks[prop:EntIndex()] ~= nil
 end
 
 local function StartPropRecording(ply, prop, boxid)
+    AR_Log("StartPropRecording called for prop: ", prop:EntIndex(), " with boxid: ", boxid)
     if prop.ActionRecorder_Recording then return end
 
     ply.ActionRecordData = ply.ActionRecordData or {}
@@ -80,14 +75,6 @@ local function StartPropRecording(ply, prop, boxid)
     ply.ActionRecordData[id] = {}
     prop.ActionRecorder_Recording = true
     local timerName = "ActionRecorder_Prop_"..ply:EntIndex().."_"..id
-
-    local phys = prop:GetPhysicsObject()
-    if IsValid(phys) and phys:IsMoveable() == false then
-        table.insert(ply.ActionRecordData[id], {
-            frozen = true,
-            time = CurTime()
-        })
-    end
 
     timer.Create(timerName, 0.02, 0, function()
         if not IsValid(prop) or not IsValid(ply) or not ply.ActionRecorderEnabled or not ply.ActionRecordData then
@@ -136,6 +123,7 @@ local function StartPropRecording(ply, prop, boxid)
 
         if changed then
             table.insert(ply.ActionRecordData[id], cur)
+            AR_Log("Recording frame for prop ", tostring(id), ": Pos=", tostring(cur.pos), ", Ang=", tostring(cur.ang), ", Time=", tostring(cur.time))
         end
     end)
 end
@@ -170,9 +158,8 @@ hook.Add("Think", "ActionRecorder_Think", function()
     end
 end)
 
-
-
 function TOOL:LeftClick(trace)
+    AR_Log("TOOL:LeftClick called")
     if SERVER then
         local ply = self:GetOwner()
         ply.ActionRecorderEnabled = not ply.ActionRecorderEnabled
@@ -254,13 +241,12 @@ end
 
 
 function TOOL:RightClick(trace)
+    AR_Log("TOOL:RightClick called")
     if CLIENT then return true end
 
     local ply = self:GetOwner()
     local globalMode = GetConVar("actionrecorder_globalmode"):GetBool()
-    local speed, loop, playbackType, model, boxid, key, soundpath
-    local easing, easing_amplitude, easing_frequency, easing_invert, easing_offset
-    local physicsless, freezeonend
+    local speed, loop, playbackType, model, boxid, key, soundpath, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset
 
     if globalMode and ply:IsAdmin() then
         speed = tonumber(GetConVar("actionrecorder_playbackspeed"):GetString()) or 1
@@ -275,8 +261,6 @@ function TOOL:RightClick(trace)
         easing_frequency = GetConVar("actionrecorder_easing_frequency"):GetFloat()
         easing_invert = GetConVar("actionrecorder_easing_invert"):GetBool()
         easing_offset = GetConVar("actionrecorder_easing_offset"):GetFloat()
-        physicsless = GetConVar("ar_physicsless_teleport"):GetBool()
-        freezeonend = GetConVar("actionrecorder_freezeonend"):GetBool()
     else
         speed = ply:GetInfoNum("actionrecorder_playbackspeed", 1)
         loop = ply:GetInfoNum("actionrecorder_loop", 0)
@@ -290,18 +274,6 @@ function TOOL:RightClick(trace)
         easing_frequency = ply:GetInfoNum("actionrecorder_easing_frequency", 1)
         easing_invert = ply:GetInfoNum("actionrecorder_easing_invert", 0) == 1
         easing_offset = ply:GetInfoNum("actionrecorder_easing_offset", 0)
-        physicsless = ply:GetInfoNum("ar_physicsless_teleport", 0) == 1
-        freezeonend = ply:GetInfoNum("actionrecorder_freezeonend", 0) == 1 
-    end
-
-    for _, ent in pairs(ents.FindByClass("action_playback_box")) do
-        if IsValid(ent) and ent:GetOwner() == ply and ent.NumpadKey == key and key ~= 0 and ent:GetNWString("BoxID", "") ~= boxid then
-            net.Start("ActionRecorderNotify")
-            net.WriteString("Keybind already used by another one of your boxes!")
-            net.WriteInt(1, 1)
-            net.Send(ply)
-            return false
-        end
     end
 
     local found_box_owned = nil
@@ -322,19 +294,12 @@ function TOOL:RightClick(trace)
     end
 
     if found_box_owned then
-        found_box_owned:UpdateSettings(
-            speed, loop, playbackType, model, boxid, soundpath,
-            easing, easing_amplitude, easing_frequency, easing_invert, easing_offset,
-            physicsless, freezeonend
-        )
+        found_box_owned:UpdateSettings(speed, loop, playbackType, model, boxid, soundpath, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset)
         found_box_owned.NumpadKey = key
-        found_box_owned:SetPhysicslessTeleport(physicsless)
-        found_box_owned:SetNWBool("FreezeOnEnd", freezeonend) 
-        found_box_owned:SetupNumpad()
-
+        if SERVER then found_box_owned:SetupNumpad() end
         net.Start("ActionRecorderNotify")
         net.WriteString("Playback box with BoxID '" .. boxid .. "' updated with new settings!")
-        net.WriteInt(3, 3)
+        net.WriteInt(3, 3) 
         net.Send(ply)
         return true
     end
@@ -353,19 +318,14 @@ function TOOL:RightClick(trace)
     ent:SetPos(trace.HitPos + Vector(0, 0, 10))
     ent:Spawn()
     ent:SetPlaybackData(ply.ActionRecordData)
-    ent:SetPlaybackSettings(
-        speed, loop, playbackType,
-        easing, easing_amplitude, easing_frequency, easing_invert, easing_offset, physicsless, freezeonend
-    )
+    ent:SetPlaybackSettings(speed, loop, playbackType, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset)
     ent:SetModelPath(model)
     ent:SetBoxID(boxid)
     ent:SetOwner(ply)
     ent:SetOwnerName(ply:Nick() or "Unknown")
     ent.NumpadKey = key
     ent:SetSoundPath(soundpath)
-    ent:SetPhysicslessTeleport(physicsless)
-    ent:SetNWBool("FreezeOnEnd", freezeonend)
-    ent:SetupNumpad()
+    if SERVER then ent:SetupNumpad() end
 
     undo.Create("Action Playback Box")
         undo.AddEntity(ent)
@@ -381,8 +341,6 @@ function TOOL:RightClick(trace)
 
     return true
 end
-
-
 
 
 
@@ -495,7 +453,6 @@ function TOOL.BuildCPanel(panel)
     generalSettingsForm:TextEntry("Model", "actionrecorder_model")
     generalSettingsForm:TextEntry("Playback Box ID", "actionrecorder_boxid")
     generalSettingsForm:TextEntry("Activation Sound", "actionrecorder_soundpath")
-	generalSettingsForm:CheckBox("Freeze End(NO LOOP Only)", "actionrecorder_freezeonend")
     generalSettingsForm:CheckBox("Physicsless Teleport", "ar_physicsless_teleport")
     local keyBinder = vgui.Create("DBinder")
     keyBinder:SetConVar("actionrecorder_key")
@@ -564,13 +521,12 @@ end
 
 
 function TOOL:GetSetConVars(ply)
+    AR_Log("TOOL:GetSetConVars called")
     local globalMode = GetConVar("actionrecorder_globalmode"):GetBool()
     local cvars = {
         "actionrecorder_playbackspeed",
         "actionrecorder_loop",
         "actionrecorder_playbacktype",
-		"actionrecorder_freezeonend",
-		"ar_physicsless_teleport",
         "actionrecorder_model",
         "actionrecorder_boxid",
         "actionrecorder_key",
@@ -597,6 +553,7 @@ function TOOL:GetSetConVars(ply)
 end
 
 function TOOL:ApplyConVars(ply, settings)
+    AR_Log("TOOL:ApplyConVars called")
     local globalMode = GetConVar("actionrecorder_globalmode"):GetBool()
     for cvar, val in pairs(settings) do
         if globalMode and ply:IsAdmin() then
@@ -608,6 +565,7 @@ function TOOL:ApplyConVars(ply, settings)
 end
 
 function TOOL:Holster()
+    AR_Log("TOOL:Holster called")
     if CLIENT then
         if IsValid(self.CustomEasingEditor) then
             self.CustomEasingEditor:Close()
