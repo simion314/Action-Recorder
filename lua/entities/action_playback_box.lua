@@ -35,6 +35,7 @@ function ENT:Initialize()
     self.InitialAngles = {}
     self.ShouldSmoothReturn = false
     self.PhysicslessTeleport = false
+    self.EntityFrameIndices = {} -- Track frame indices per entity
 
     if SERVER and not self:GetNWString("OwnerName", nil) then
         self:SetNWString("OwnerName", "Unknown")
@@ -47,6 +48,9 @@ function ENT:Initialize()
             self.Outputs = WireLib.CreateOutputs(self, { "IsPlaying", "PlaybackSpeed", "Frame" })
         end
     end
+
+    -- Initialize loop mode handlers
+    self:InitLoopModeHandlers()
 end
 
 function ENT:SetupNumpad()
@@ -176,6 +180,7 @@ function ENT:StopPlayback(forceReturn)
     self.PlaybackTimers = {}
     self.IsPlayingBack = false
     self.IsActivated = false
+    self.EntityFrameIndices = {} -- Reset frame indices
 
     local freezeOnEnd = self:GetNWBool("FreezeOnEnd", false)
 
@@ -220,6 +225,7 @@ function ENT:StartPlayback()
     self.PlaybackDirection = AR_PLAYBACK_DIRECTION.FORWARD
 
     self.IsActivated = true
+    self.EntityFrameIndices = {} -- Reset frame indices
 
     local freezeOnEnd = self:GetNWBool("FreezeOnEnd", false)
 
@@ -245,6 +251,8 @@ function ENT:SetupEntityPlayback(entIndex, frames, freezeOnEnd)
     ent:SetCollisionGroup(COLLISION_GROUP_NONE)
 
     local i = (self.PlaybackSpeed < 0) and frameCount or 1
+    self.EntityFrameIndices[entIndex] = i -- Store initial frame index
+
     local timerName = "Playback_" .. self:EntIndex() .. "_" .. entIndex .. "_" .. self.PlaybackCounter
     self.PlaybackTimers[entIndex] = timerName
 
@@ -273,43 +281,34 @@ function ENT:SetupEntityPlayback(entIndex, frames, freezeOnEnd)
         self.InitialAngles[entIndex] = ent:GetAngles()
     end
 
-    -- Store frame index in the entity for the timer callback
-    ent.PlaybackFrameIndex = i
-
     timer.Create(timerName, math.abs(0.02 / (self.PlaybackSpeed or 1)), 0, function()
         self:PlaybackTimerCallback(timerName, entIndex, ent, phys, frames, frameCount, basePos)
     end)
 end
 
 function ENT:PlaybackTimerCallback(timerName, entIndex, ent, phys, frames, frameCount, basePos)
-    if not IsValid(self) or not self.PlaybackSpeed or not self.PlaybackTimers then
-        timer.Remove(timerName)
-        if ent then
-            ent.IsBeingPlayedBack = false
-            ent.PlaybackBox = nil
-        end
+    -- Validate playback conditions
+    if not self:ValidatePlaybackConditions(timerName, entIndex, ent) then
         return
     end
 
-    if not IsValid(ent) or not IsValid(phys) then
-        timer.Remove(timerName)
-        if self.PlaybackTimers then self.PlaybackTimers[entIndex] = nil end
-        if ent then
-            ent.IsBeingPlayedBack = false
-            ent.PlaybackBox = nil
-        end
-        return
-    end
-
-    -- Get the current frame index from the entity
-    local i = ent.PlaybackFrameIndex
+    -- Get the current frame index from our tracking table
+    local i = self.EntityFrameIndices[entIndex]
     local frame = frames[i]
 
     if not frame then
-        frame = self:HandleLoopMode(timerName, entIndex, ent, phys, frames, i, frameCount, basePos)
+        local loopHandler = self.LoopModeHandlers[self.LoopMode]
+        if loopHandler then
+            frame, i = loopHandler(self, timerName, entIndex, ent, phys, frames, i, frameCount, basePos)
+        else
+            -- Default to no loop behavior if handler not found
+            self:CleanupPlayback(timerName, entIndex, ent, phys)
+            return
+        end
+
         if not frame then return end
         -- Update the frame index after loop handling
-        i = ent.PlaybackFrameIndex
+        self.EntityFrameIndices[entIndex] = i
     end
 
     self:ApplyFrameData(ent, frame, basePos)
@@ -319,53 +318,82 @@ function ENT:PlaybackTimerCallback(timerName, entIndex, ent, phys, frames, frame
 
     -- Update the frame index for next callback
     i = i + (self.PlaybackDirection * (self.PlaybackSpeed < 0 and -1 or 1))
-    ent.PlaybackFrameIndex = i
+    self.EntityFrameIndices[entIndex] = i
+end
+
+-- Validate playback conditions and handle cleanup if needed
+function ENT:ValidatePlaybackConditions(timerName, entIndex, ent)
+    -- Check if the playback box is still valid
+    if not IsValid(self) or not self.PlaybackSpeed or not self.PlaybackTimers then
+        self:CleanupPlayback(timerName, entIndex, ent)
+        return false
+    end
+
+    -- Check if the entity and its physics object are still valid
+    local phys = ent:GetPhysicsObject()
+    if not IsValid(ent) or not IsValid(phys) then
+        self:CleanupPlayback(timerName, entIndex, ent)
+        return false
+    end
+
+    return true
+end
+
+-- Initialize loop mode handlers
+function ENT:InitLoopModeHandlers()
+    self.LoopModeHandlers = {
+        [AR_LOOP_MODE.LOOP] = function(self, timerName, entIndex, ent, phys, frames, i, frameCount, basePos)
+            return self:HandleLoopMode(timerName, entIndex, ent, phys, frames, i, frameCount, basePos)
+        end,
+        [AR_LOOP_MODE.PING_PONG] = function(self, timerName, entIndex, ent, phys, frames, i, frameCount, basePos)
+            return self:HandlePingPongMode(timerName, entIndex, ent, phys, frames, i, frameCount, basePos)
+        end,
+        [AR_LOOP_MODE.NO_LOOP_SMOOTH] = function(self, timerName, entIndex, ent, phys, frames, i, frameCount, basePos)
+            return self:HandleSmoothLoopMode(timerName, entIndex, ent, phys, frames, i, frameCount, basePos)
+        end,
+        [AR_LOOP_MODE.NO_LOOP] = function(self, timerName, entIndex, ent, phys, frames, i, frameCount, basePos)
+            self:CleanupPlayback(timerName, entIndex, ent, phys)
+            return nil, i
+        end
+    }
 end
 
 function ENT:HandleLoopMode(timerName, entIndex, ent, phys, frames, i, frameCount, basePos)
-    if self.LoopMode == AR_LOOP_MODE.LOOP then -- Loop
-        i = (self.PlaybackSpeed < 0) and frameCount or 1
-        local frame = frames[i]
-        basePos = (frame and frame.pos and self.PlaybackType == AR_PLAYBACK_TYPE.RELATIVE) and (ent:GetPos() - frame.pos) or Vector(0,0,0)
-        -- Update the frame index
-        ent.PlaybackFrameIndex = i
-        return frame
-    elseif self.LoopMode == AR_LOOP_MODE.PING_PONG then -- Ping-Pong
-        self.PlaybackDirection = self.PlaybackDirection * -1
-        i = i + (self.PlaybackDirection * (self.PlaybackSpeed < 0 and -1 or 1) * 2)
-        local frame = frames[i]
-        basePos = (frame and frame.pos and self.PlaybackType == AR_PLAYBACK_TYPE.RELATIVE) and (ent:GetPos() - frame.pos) or Vector(0,0,0)
-        -- Update the frame index
-        ent.PlaybackFrameIndex = i
-        return frame
-    elseif self.LoopMode == AR_LOOP_MODE.NO_LOOP_SMOOTH then -- No Loop (Smooth)
-        return self:HandleSmoothLoop(timerName, entIndex, ent, phys, frames, i, frameCount, basePos)
-    else -- No Loop (original)
-        self:CleanupPlayback(timerName, entIndex, ent, phys)
-        return nil
-    end
+    i = (self.PlaybackSpeed < 0) and frameCount or 1
+    local frame = frames[i]
+    basePos = (frame and frame.pos and self.PlaybackType == AR_PLAYBACK_TYPE.RELATIVE) and (ent:GetPos() - frame.pos) or Vector(0,0,0)
+    return frame, i
 end
 
-function ENT:HandleSmoothLoop(timerName, entIndex, ent, phys, frames, i, frameCount, basePos)
+function ENT:HandlePingPongMode(timerName, entIndex, ent, phys, frames, i, frameCount, basePos)
+    self.PlaybackDirection = self.PlaybackDirection * -1
+    i = i + (self.PlaybackDirection * (self.PlaybackSpeed < 0 and -1 or 1) * 2)
+    i = math.Clamp(i, 1, frameCount) -- Ensure i stays within bounds
+    local frame = frames[i]
+    basePos = (frame and frame.pos and self.PlaybackType == AR_PLAYBACK_TYPE.RELATIVE) and (ent:GetPos() - frame.pos) or Vector(0,0,0)
+    return frame, i
+end
+
+function ENT:HandleSmoothLoopMode(timerName, entIndex, ent, phys, frames, i, frameCount, basePos)
     if self.PlaybackDirection == AR_PLAYBACK_DIRECTION.FORWARD then -- Finished forward playback, start reverse
         self.PlaybackDirection = AR_PLAYBACK_DIRECTION.REVERSE
         i = frameCount -- Start from the end for reverse
         local frame = frames[i]
         basePos = (frame and frame.pos and self.PlaybackType == AR_PLAYBACK_TYPE.RELATIVE) and (ent:GetPos() - frame.pos) or Vector(0,0,0)
-        -- Update the frame index
-        ent.PlaybackFrameIndex = i
-        return frame
+        return frame, i
     else -- Finished reverse playback
         self:CleanupPlayback(timerName, entIndex, ent, phys)
-        return nil
+        return nil, i
     end
 end
 
 function ENT:CleanupPlayback(timerName, entIndex, ent, phys)
     timer.Remove(timerName)
     if self.PlaybackTimers then self.PlaybackTimers[entIndex] = nil end
-    ent.IsBeingPlayedBack = false
-    ent.PlaybackBox = nil
+    if ent then
+        ent.IsBeingPlayedBack = false
+        ent.PlaybackBox = nil
+    end
     local allDone = true
     if self.PlaybackTimers then
         for _, v in pairs(self.PlaybackTimers) do
