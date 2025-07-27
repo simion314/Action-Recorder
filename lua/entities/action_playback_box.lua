@@ -1,3 +1,4 @@
+---@diagnostic disable: undefined-global
 AddCSLuaFile()
 
 ENT.Type = "anim"
@@ -15,9 +16,9 @@ function ENT:Initialize()
     self.PlaybackData = {} 
     self.PlaybackTimers = {}
     self.PlaybackSpeed = 1
-    self.LoopMode = 0
-    self.PlaybackDirection = 1
-    self.PlaybackType = "absolute"
+    self.LoopMode = AR_LOOP_MODE.NO_LOOP
+    self.PlaybackDirection = AR_PLAYBACK_DIRECTION.FORWARD
+    self.PlaybackType = AR_PLAYBACK_TYPE.ABSOLUTE
     self.Easing = "Linear"
     self.EasingAmplitude = 1
     self.EasingFrequency = 1
@@ -97,8 +98,8 @@ end
 
 function ENT:SetPlaybackSettings(speed, loopMode, playbackType, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset)
     self.PlaybackSpeed = speed or 1
-    self.LoopMode = loopMode or 0
-    self.PlaybackType = playbackType or "absolute"
+    self.LoopMode = loopMode or AR_LOOP_MODE.NO_LOOP
+    self.PlaybackType = playbackType or AR_PLAYBACK_TYPE.ABSOLUTE
     self.Easing = easing or "Linear"
     self.EasingAmplitude = easing_amplitude or 1
     self.EasingFrequency = easing_frequency or 1
@@ -185,7 +186,7 @@ function ENT:StopPlayback(forceReturn)
     local freezeOnEnd = self:GetNWBool("FreezeOnEnd", false)
 
     
-    if freezeOnEnd and (self.LoopMode == 0 or self.LoopMode == 3) then
+    if freezeOnEnd and (self.LoopMode == AR_LOOP_MODE.NO_LOOP or self.LoopMode == AR_LOOP_MODE.NO_LOOP_SMOOTH) then
         for entIndex, _ in pairs(self.PlaybackData or {}) do
             local ent = Entity(entIndex)
             if IsValid(ent) then
@@ -203,6 +204,10 @@ end
 
 
 
+function ENT:Cleanup()
+
+
+end
 function ENT:StartPlayback()
 
 
@@ -227,7 +232,7 @@ function ENT:StartPlayback()
     self.PlaybackTimers = {}
     self.PlaybackCounter = (self.PlaybackCounter or 0) + 1
     self.IsPlayingBack = true
-    self.PlaybackDirection = 1
+    self.PlaybackDirection = AR_PLAYBACK_DIRECTION.FORWARD
 
     self.IsActivated = true
 
@@ -244,7 +249,7 @@ function ENT:StartPlayback()
         if frameCount == 0 then continue end
 
         
-        if not (freezeOnEnd and (self.LoopMode == 0 or self.LoopMode == 3)) then
+        if not (freezeOnEnd and (self.LoopMode == AR_LOOP_MODE.NO_LOOP or self.LoopMode == AR_LOOP_MODE.NO_LOOP_SMOOTH)) then
             phys:EnableMotion(true)
         end
 
@@ -255,7 +260,7 @@ function ENT:StartPlayback()
         local timerName = "Playback_" .. self:EntIndex() .. "_" .. entIndex .. "_" .. self.PlaybackCounter
         self.PlaybackTimers[entIndex] = timerName
 
-        local basePos = (self.PlaybackType == "relative" and frames[i] and frames[i].pos) and (ent:GetPos() - frames[i].pos) or Vector(0,0,0)
+        local basePos = (self.PlaybackType == AR_PLAYBACK_TYPE.RELATIVE and frames[i] and frames[i].pos) and (ent:GetPos() - frames[i].pos) or Vector(0,0,0)
 
         if ent.IsBeingPlayedBack and ent.PlaybackBox and ent.PlaybackBox ~= self then
             ent.IsBeingPlayedBack = false
@@ -276,7 +281,7 @@ function ENT:StartPlayback()
         ent.IsBeingPlayedBack = true
         ent.PlaybackBox = self
 
-        if false then
+        if i== 0 then --TODO verify if this is correct
             self.InitialPositions[entIndex] = ent:GetPos()
             self.InitialAngles[entIndex] = ent:GetAngles()
         end
@@ -303,21 +308,21 @@ function ENT:StartPlayback()
 
             local frame = frames[i]
             if not frame then
-                if self.LoopMode == 1 then -- Loop
+                if self.LoopMode == AR_LOOP_MODE.LOOP then -- Loop
                     i = (self.PlaybackSpeed < 0) and frameCount or 1
                     frame = frames[i]
-                    basePos = (frame and frame.pos and self.PlaybackType == "relative") and (ent:GetPos() - frame.pos) or Vector(0,0,0)
-                elseif self.LoopMode == 2 then -- Ping-Pong
+                    basePos = (frame and frame.pos and self.PlaybackType == AR_PLAYBACK_TYPE.RELATIVE) and (ent:GetPos() - frame.pos) or Vector(0,0,0)
+                elseif self.LoopMode == AR_LOOP_MODE.PING_PONG then -- Ping-Pong
                     self.PlaybackDirection = self.PlaybackDirection * -1
                     i = i + (self.PlaybackDirection * (self.PlaybackSpeed < 0 and -1 or 1) * 2)
                     frame = frames[i]
-                    basePos = (frame and frame.pos and self.PlaybackType == "relative") and (ent:GetPos() - frame.pos) or Vector(0,0,0)
-                elseif self.LoopMode == 3 then -- No Loop (Smooth)
-                    if self.PlaybackDirection == 1 then -- Finished forward playback, start reverse
-                        self.PlaybackDirection = -1
+                    basePos = (frame and frame.pos and self.PlaybackType == AR_PLAYBACK_TYPE.RELATIVE) and (ent:GetPos() - frame.pos) or Vector(0,0,0)
+                elseif self.LoopMode == AR_LOOP_MODE.NO_LOOP_SMOOTH then -- No Loop (Smooth)
+                    if self.PlaybackDirection == AR_PLAYBACK_DIRECTION.FORWARD then -- Finished forward playback, start reverse
+                        self.PlaybackDirection = AR_PLAYBACK_DIRECTION.REVERSE
                         i = frameCount -- Start from the end for reverse
                         frame = frames[i]
-                        basePos = (frame and frame.pos and self.PlaybackType == "relative") and (ent:GetPos() - frame.pos) or Vector(0,0,0)
+                        basePos = (frame and frame.pos and self.PlaybackType == AR_PLAYBACK_TYPE.RELATIVE) and (ent:GetPos() - frame.pos) or Vector(0,0,0)
                     else -- Finished reverse playback
                         timer.Remove(timerName)
                         if self.PlaybackTimers then self.PlaybackTimers[entIndex] = nil end
@@ -331,7 +336,7 @@ function ENT:StartPlayback()
                         end
                         if allDone then
                             self.IsPlayingBack = false
-                            self.PlaybackDirection = 1 -- Reset direction for next playback
+                            self.PlaybackDirection = AR_PLAYBACK_DIRECTION.FORWARD -- Reset direction for next playback
                             self.IsOneTimeSmoothReturn = false -- Reset flag
                         end
                         return
