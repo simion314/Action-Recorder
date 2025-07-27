@@ -14,3 +14,5 @@ AR_PLAYBACK_TYPE = {
     ABSOLUTE = "absolute",
     RELATIVE = "relative",
 }
+
+AR_FRAME_INTERVAL = 0.02
