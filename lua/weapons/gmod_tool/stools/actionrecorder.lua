@@ -254,15 +254,13 @@ end
 
 
 function TOOL:RightClick(trace)
-ARLog("RightClick")
     if CLIENT then return true end
-
     local ply = self:GetOwner()
     local globalMode = GetConVar("actionrecorder_globalmode"):GetBool()
     local speed, loop, playbackType, model, boxid, key, soundpath
     local easing, easing_amplitude, easing_frequency, easing_invert, easing_offset
     local physicsless, freezeonend
-ARLog("RightClick2")
+
     if globalMode and ply:IsAdmin() then
         speed = tonumber(GetConVar("actionrecorder_playbackspeed"):GetString()) or 1
         loop = GetConVar("actionrecorder_loop"):GetInt()
@@ -294,7 +292,7 @@ ARLog("RightClick2")
         physicsless = ply:GetInfoNum("ar_physicsless_teleport", 0) == 1
         freezeonend = ply:GetInfoNum("actionrecorder_freezeonend", 0) == 1 
     end
-ARLog("RightClick3")
+
     for _, ent in pairs(ents.FindByClass("action_playback_box")) do
         if IsValid(ent) and ent:GetOwner() == ply and ent.NumpadKey == key and key ~= 0 and ent:GetNWString("BoxID", "") ~= boxid then
             net.Start("ActionRecorderNotify")
@@ -304,7 +302,7 @@ ARLog("RightClick3")
             return false
         end
     end
-ARLog("RightClick4")
+
     local found_box_owned = nil
     for _, ent in pairs(ents.FindByClass("action_playback_box")) do
         local entBoxID = ent.GetNWString and ent:GetNWString("BoxID", "") or (ent.BoxID or "")
@@ -321,7 +319,7 @@ ARLog("RightClick4")
             end
         end
     end
-ARLog("RightClick5")
+
     if found_box_owned then
         found_box_owned:UpdateSettings(
             speed, loop, playbackType, model, boxid, soundpath,
@@ -339,7 +337,7 @@ ARLog("RightClick5")
         net.Send(ply)
         return true
     end
-ARLog("RightClick6")
+
     if not ply.ActionRecordData or table.Count(ply.ActionRecordData) == 0 then
         net.Start("ActionRecorderNotify")
         net.WriteString("No recording found!")
@@ -347,9 +345,7 @@ ARLog("RightClick6")
         net.Send(ply)
         return false
     end
-    ARLog("BEFORE CREATE")
     local ent = ents.Create("action_playback_box")
-    ARLog("BEFORE CREATE")
     if not IsValid(ent) then return false end
 
     ent:SetPos(trace.HitPos + Vector(0, 0, 10))
