@@ -4,7 +4,7 @@ if CLIENT then
 end
 
 function ARLog(...)
-    if CLIENT and GetConVar("ar_debug"):GetBool() then
+    if GetConVar("ar_debug"):GetInt() then
         local args = {...}
         for i, v in ipairs(args) do
             if type(v) == "table" then
