@@ -99,7 +99,9 @@ function ENT:SetPlaybackData(data)
     self.PlaybackData = {}
     self.AnimationInfo = {}
     for id,frames in pairs(data) do
-        if not #frames then continue end--just ignore zero frames recordings
+        if not frames or 0 == #frames then
+            ARLog("attempt to setplayback entity with zero frames skipping")
+            continue end--just ignore zero frames recordings
         self.PlaybackData[id] = frames
         self.AnimationInfo[id] = {
             frameCount = #frames,
@@ -295,7 +297,7 @@ function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
     if direction > 0 then
          -- ARLog("Positive direction detected")
         if not atEnd then
-            ARLog("Not at end, incrementing index")
+            --ARLog("Not at end, incrementing index")
             nextFrameIndex = math.min(nextFrameIndex + amount, frameCount)
         else
             ARLog("At end, handling loop modes")
@@ -316,7 +318,7 @@ function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
     else -- direction < 0 case
          -- ARLog("Negative direction detected")
         if not atStart then
-            ARLog("Not at start, decrementing index")
+            --ARLog("Not at start, decrementing index")
             nextFrameIndex = math.max(1, nextFrameIndex - amount)
         else
             ARLog("At start, handling loop modes")
@@ -430,10 +432,14 @@ function ENT:ProcessPlayback()
 
          local info = self.AnimationInfo[entIndex]
          local frameCount = info.frameCount
+         if frameCount == 0 then
+            ARLog("This entity has zero frames, should not have been added ", endIndex)
+            continue
+         end
          local frameIndex = self:calculateNextFrame(info.currentFrameIndex, frameCount)
          if (frameIndex == info.currentFrameIndex) then
-                ARLog("no move, probably speed is low")
-                return
+                --ARLog("no move, probably speed is low")
+                continue
             end
 
 
