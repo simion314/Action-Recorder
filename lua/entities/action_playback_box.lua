@@ -417,11 +417,6 @@ function ENT:SetupEntityPlayback(entIndex)
     end
     ent.IsBeingPlayedBack = true
     ent.PlaybackBox = self
-
-    if i == 0 then --TODO verify if this is correct
-        self.InitialPositions[entIndex] = ent:GetPos()
-        self.InitialAngles[entIndex] = ent:GetAngles()
-    end
 end
 
 function ENT:calculateDirection()
@@ -472,9 +467,131 @@ function ENT:ProcessPlayback()
             self:ApplyFrameData(ent, frame, basePos)
         end
         info.currentFrameIndex = frameIndex
+        
+        -- Apply interpolation for smooth movement
+        self:InterpolateActivePlayback(ent)
     end
 
     self.LastFrameTime = now
+end
+
+function ENT:InterpolateActivePlayback(ent)
+    if not IsValid(ent) or not ent.IsBeingPlayedBack or not IsValid(ent.PlaybackBox) then
+        return
+    end
+    
+    local phys = ent:GetPhysicsObject()
+    if not IsValid(phys) then return end
+    
+    local alpha = 1 -- TODO implement this properly
+    local easing_func = ActionRecorder.EasingFunctions[ent.PlaybackBox.Easing or "Linear"]
+    if easing_func then
+        alpha = math.Clamp(alpha, 0, 1)
+        local original_alpha = alpha
+        local t = alpha
+        t = t + ent.PlaybackBox.EasingOffset
+        t = t * ent.PlaybackBox.EasingFrequency
+
+        local eased_alpha = easing_func(t)
+
+        if eased_alpha ~= eased_alpha or math.abs(eased_alpha) == math.huge then
+            eased_alpha = original_alpha
+        end
+
+        if ent.PlaybackBox.EasingInvert then
+            eased_alpha = 1 - eased_alpha
+        end
+
+        alpha = Lerp(ent.PlaybackBox.EasingAmplitude, original_alpha, eased_alpha)
+
+        if alpha ~= alpha or math.abs(alpha) == math.huge then
+            alpha = eased_alpha
+        end
+    end
+
+    local interpolatedPos = LerpVector(alpha, ent:GetPos(), ent.TargetPos)
+    local interpolatedAng = LerpAngle(alpha, ent:GetAngles(), ent.TargetAng)
+
+    local params = {
+        pos = interpolatedPos,
+        angle = interpolatedAng,
+        maxspeed = 10000,
+        maxangular = 10000,
+        maxspeeddamp = 10000,
+        maxangulardamp = 10000,
+        dampfactor = 1,
+        teleportdistance = ent.PlaybackBox and ent.PlaybackBox.PhysicslessTeleport and 0.1 or 0,
+        deltaTime = FrameTime()
+    }
+    phys:Wake()
+    phys:ComputeShadowControl(params)
+end
+
+function ENT:InterpolateSmoothReturn(ent)
+    if not IsValid(ent) or not ent.PlaybackBox or not ent.PlaybackBox.IsOneTimeSmoothReturn then
+        return
+    end
+    
+    if ent.PlaybackBox.status == AR_ANIMATION_STATUS.PLAYING then
+        return
+    end
+    
+    local playbackBox = ent.PlaybackBox
+    local initialPos = playbackBox.InitialPositions[ent:EntIndex()]
+    local initialAng = playbackBox.InitialAngles[ent:EntIndex()]
+
+    if not initialPos or not initialAng then return end
+    
+    local phys = ent:GetPhysicsObject()
+    if not IsValid(phys) then return end
+
+    local alpha = 1 -- TODO implement this properly
+    local easing_func = ActionRecorder.EasingFunctions[playbackBox.Easing or "Linear"]
+    if easing_func then
+        alpha = math.Clamp(alpha, 0, 1)
+        local original_alpha = alpha
+
+        local t = alpha
+        t = t + playbackBox.EasingOffset
+        t = t * playbackBox.EasingFrequency
+
+        local eased_alpha = easing_func(t)
+
+        if eased_alpha ~= eased_alpha or math.abs(eased_alpha) == math.huge then
+            eased_alpha = original_alpha
+        end
+
+        if playbackBox.EasingInvert then
+            eased_alpha = 1 - eased_alpha
+        end
+
+        alpha = Lerp(playbackBox.EasingAmplitude, original_alpha, eased_alpha)
+
+        if alpha ~= alpha or math.abs(alpha) == math.huge then
+            alpha = eased_alpha
+        end
+    end
+
+    local interpolatedPos = LerpVector(alpha, ent:GetPos(), initialPos)
+    local interpolatedAng = LerpAngle(alpha, ent:GetAngles(), initialAng)
+
+    local params = {
+        pos = interpolatedPos,
+        angle = interpolatedAng,
+        maxspeed = 10000,
+        maxangular = 10000,
+        maxspeeddamp = 10000,
+        maxangulardamp = 10000,
+        dampfactor = 1,
+        teleportdistance = playbackBox and playbackBox.PhysicslessTeleport and 0.1 or 0,
+        deltaTime = FrameTime()
+    }
+    phys:Wake()
+    phys:ComputeShadowControl(params)
+
+    if alpha >= 1 then
+        playbackBox.IsOneTimeSmoothReturn = false
+    end
 end
 
 function ENT:ApplyFrameData(ent, frame, basePos)
@@ -517,120 +634,11 @@ if CLIENT then
     end
 end
 
-hook.Add("Think", "ActionRecorder_PlaybackThink", function()
-    local alpha = 1 -- TODO implement this
-    --ARLog("TODO Think is disabled")
-
+-- Handle smooth return for entities that need it
+hook.Add("Think", "ActionRecorder_SmoothReturn", function()
     for _, ent in pairs(ents.GetAll()) do
-        -- Skip entities that are being recorded
-        if ent.ActionRecorder_Recording then continue end
-
-        if IsValid(ent) and ent.IsBeingPlayedBack and IsValid(ent.PlaybackBox) then
-            local phys = ent:GetPhysicsObject()
-            if IsValid(phys) then
-
-                local easing_func = ActionRecorder.EasingFunctions[ent.PlaybackBox.Easing or "Linear"]
-                if easing_func then
-                     alpha = math.Clamp(alpha, 0, 1)
-                     local original_alpha = alpha
-                    local t = alpha
-                    t = t + ent.PlaybackBox.EasingOffset
-                    t = t * ent.PlaybackBox.EasingFrequency
-
-                    local eased_alpha = easing_func(t)
-
-                    if eased_alpha ~= eased_alpha or math.abs(eased_alpha) == math.huge then
-                        eased_alpha = original_alpha
-                    end
-
-                    if ent.PlaybackBox.EasingInvert then
-                        eased_alpha = 1 - eased_alpha
-                    end
-
-                    alpha = Lerp(ent.PlaybackBox.EasingAmplitude, original_alpha, eased_alpha)
-
-                    if alpha ~= alpha or math.abs(alpha) == math.huge then
-                        alpha = eased_alpha
-                    end
-                end
-
-                local interpolatedPos = LerpVector(alpha, ent:GetPos(), ent.TargetPos)
-                local interpolatedAng = LerpAngle(alpha, ent:GetAngles(), ent.TargetAng)
-
-                local params = {
-                    pos = interpolatedPos,
-                    angle = interpolatedAng,
-                    maxspeed = 10000,
-                    maxangular = 10000,
-                    maxspeeddamp = 10000,
-                    maxangulardamp = 10000,
-                    dampfactor = 1,
-                    teleportdistance = ent.PlaybackBox and ent.PlaybackBox.PhysicslessTeleport and 0.1 or 0,
-                    deltaTime = FrameTime()
-                }
-                phys:Wake()
-                phys:ComputeShadowControl(params)
-            end
-        end
-
-        -- Smooth return for No Loop (Smooth) when playback is finished
-        if IsValid(ent) and ent.PlaybackBox and ent.PlaybackBox.IsOneTimeSmoothReturn and ent.PlaybackBox.status  ~= AR_ANIMATION_STATUS.PLAYING then
-            local playbackBox = ent.PlaybackBox
-            local initialPos = playbackBox.InitialPositions[ent:EntIndex()]
-            local initialAng = playbackBox.InitialAngles[ent:EntIndex()]
-
-            if initialPos and initialAng then
-                local phys = ent:GetPhysicsObject()
-                if IsValid(phys) then
-
-                    local easing_func = ActionRecorder.EasingFunctions[playbackBox.Easing or "Linear"]
-                    if easing_func then
-                         alpha = math.Clamp(alpha, 0, 1)
-                         local original_alpha = alpha
-
-                        local t = alpha
-                        t = t + playbackBox.EasingOffset
-                        t = t * playbackBox.EasingFrequency
-
-                        local eased_alpha = easing_func(t)
-
-                        if eased_alpha ~= eased_alpha or math.abs(eased_alpha) == math.huge then
-                            eased_alpha = original_alpha
-                        end
-
-                        if playbackBox.EasingInvert then
-                            eased_alpha = 1 - eased_alpha
-                        end
-
-                        alpha = Lerp(playbackBox.EasingAmplitude, original_alpha, eased_alpha)
-
-                        if alpha ~= alpha or math.abs(alpha) == math.huge then
-                            alpha = eased_alpha
-                        end
-                    end
-
-                    local interpolatedPos = LerpVector(alpha, ent:GetPos(), initialPos)
-                    local interpolatedAng = LerpAngle(alpha, ent:GetAngles(), initialAng)
-
-                    local params = {
-                        pos = interpolatedPos,
-                        angle = interpolatedAng,
-                        maxspeed = 10000,
-                        maxangular = 10000,
-                        maxspeeddamp = 10000,
-                        maxangulardamp = 10000,
-                        dampfactor = 1,
-                        teleportdistance = playbackBox and playbackBox.PhysicslessTeleport and 0.1 or 0,
-                        deltaTime = FrameTime()
-                    }
-                    phys:Wake()
-                    phys:ComputeShadowControl(params)
-
-                    if alpha >= 1 then
-                        playbackBox.IsOneTimeSmoothReturn = false
-                    end
-                end
-            end
+        if IsValid(ent) and ent.PlaybackBox and ent.PlaybackBox.IsOneTimeSmoothReturn then
+            ent.PlaybackBox:InterpolateSmoothReturn(ent)
         end
     end
 end)
