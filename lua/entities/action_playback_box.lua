@@ -279,6 +279,19 @@ function ENT:getFramesCount()
     -- If no frames were found for any entity, return 0
     return 0
 end
+function ENT:StopPlaybackIfNeeded()
+    local allEntitiesFinished = true
+    
+    for _, info in pairs(self.AnimationInfo or {}) do
+        if info.status ~= AR_ANIMATION_STATUS.FINISHED then
+            allEntitiesFinished = false
+            break
+        end
+    end
+    if allEntitiesFinished then
+        self:StopPlayback()
+    end
+end
 function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
 
     if frameCount <= 1 then
@@ -302,8 +315,8 @@ function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
         else
             ARLog("At end, handling loop modes")
             if self.LoopMode == AR_LOOP_MODE.NO_LOOP then
-                ARLog("No loop mode, stopping playback")
-                self:StopPlayback()
+                ARLog("No loop mode, entity finished")
+                return -1
             elseif self.LoopMode == AR_LOOP_MODE.PING_PONG then
                 ARLog("Ping pong mode, reversing direction")
                 self.PlaybackDirection = self.PlaybackDirection * (-1)
@@ -323,8 +336,8 @@ function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
         else
             ARLog("At start, handling loop modes")
             if self.LoopMode == AR_LOOP_MODE.NO_LOOP then
-                ARLog("No loop mode, stopping playback")
-                self:StopPlayback()
+                ARLog("No loop mode, entity finished")
+                return -1
             elseif self.LoopMode == AR_LOOP_MODE.PING_PONG then
                 ARLog("Ping pong mode, reversing direction")
                 self.PlaybackDirection = self.PlaybackDirection * (-1)
@@ -433,7 +446,7 @@ function ENT:ProcessPlayback()
          local info = self.AnimationInfo[entIndex]
          local frameCount = info.frameCount
          if frameCount == 0 then
-            ARLog("This entity has zero frames, should not have been added ", endIndex)
+            ARLog("This entity has zero frames, should not have been added ", entIndex)
             continue
          end
          local frameIndex = self:calculateNextFrame(info.currentFrameIndex, frameCount)
@@ -441,11 +454,15 @@ function ENT:ProcessPlayback()
                 --ARLog("no move, probably speed is low")
                 continue
             end
-
-
-
-        if frameCount == 0 then continue end
-
+         
+         -- Check if entity finished
+         if frameIndex == -1 then
+             info.status = AR_ANIMATION_STATUS.FINISHED
+             ARLog("Entity " .. entIndex .. " marked as finished")
+             -- Check if all entities are finished and stop playback if needed
+             self:StopPlaybackIfNeeded()
+             continue
+         end
 
         -- Calculate the base position
         local frame = frames[frameIndex]
@@ -661,7 +678,7 @@ function ENT:Think()
 
     if self.status == AR_ANIMATION_STATUS.PLAYING then
         WireLib.TriggerOutput(self, "PlaybackSpeed", self.PlaybackSpeed)
-        WireLib.TriggerOutput(self, "Frame", self:getFrameCount() or 0) -- TODO this look wrong , if we have multple entities then frame count is different
+        WireLib.TriggerOutput(self, "Frame", self:getFramesCount() or 0) -- TODO this look wrong , if we have multple entities then frame count is different
     end
 
     self:NextThink(CurTime())
