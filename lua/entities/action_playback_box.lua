@@ -295,10 +295,9 @@ end
 function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
 
     if frameCount <= 1 then
-            ARLog("Only one frame available, no advancement needed.")
-            ARLog(#self.PlaybackData)
-            return 1
-        end
+        ARLog("Only one frame available, marking entity as finished.")
+        return -1  -- Mark as finished to stop processing
+    end
     local atStart = currentFrameIndex == 1
     local atEnd = currentFrameIndex == frameCount
     local nextFrameIndex = currentFrameIndex
@@ -357,6 +356,7 @@ end
 
 function ENT:calculateNextFrame(currentFrameIndex, framesCount)
     local speed = self.PlaybackSpeed or 1
+    --ARLog("calculateNextFrame: speed=", speed, " currentFrame=", currentFrameIndex, " totalFrames=", framesCount)
     if (speed == 0) then
         ARLog("Speed is zero for ") -- TODO add the box id in the message
         return 1 -- move object at first frame if he set speed to 0
@@ -424,12 +424,13 @@ function ENT:calculateDirection()
 end
 function ENT:ProcessPlayback()
     if self.status ~= AR_ANIMATION_STATUS.PLAYING then
-        ARLog("Wrong status in process playback")
+        ARLog("Wrong status in process playback: ", self.status)
     return end
 
     local freezeOnEnd = self:GetNWBool("FreezeOnEnd", false)
     local now = CurTime()
 
+    --ARLog("ProcessPlayback: Processing ", table.Count(self.PlaybackData or {}), " entities")
 
     for entIndex, frames in pairs(self.PlaybackData or {}) do
          local ent = Entity(entIndex)
@@ -439,14 +440,32 @@ function ENT:ProcessPlayback()
 
 
          local info = self.AnimationInfo[entIndex]
+         
+         -- Skip entities that are already finished
+         if info.status == AR_ANIMATION_STATUS.FINISHED then
+             --ARLog("Skipping finished entity: ", entIndex)
+             continue
+         end
+         
          local frameCount = info.frameCount
+         --ARLog("Entity ", entIndex, " frameCount: ", frameCount, " currentFrame: ", info.currentFrameIndex)
          if frameCount == 0 then
             ARLog("This entity has zero frames, should not have been added ", entIndex)
             continue
          end
          local frameIndex = self:calculateNextFrame(info.currentFrameIndex, frameCount)
+         --ARLog("Entity ", entIndex, " calculated frameIndex: ", frameIndex, " (was ", info.currentFrameIndex, ")")
          if (frameIndex == info.currentFrameIndex) then
                 --ARLog("no move, probably speed is low")
+                -- Calculate interpolation alpha for slow speeds
+                --[[
+                if self.PlaybackSpeed < 1 and self.PlaybackSpeed ~= 0 then
+                    local moveTimeInterval = GLOBAL_TIMER_INTERVAL / math.abs(self.PlaybackSpeed)
+                    local timeSinceLastMove = now - self.LastFrameTime
+                    local alpha = math.min(1, timeSinceLastMove / moveTimeInterval)
+                    self:InterpolateActivePlayback(ent, alpha)
+                end
+                --]]
                 continue
             end
          
@@ -467,15 +486,13 @@ function ENT:ProcessPlayback()
             self:ApplyFrameData(ent, frame, basePos)
         end
         info.currentFrameIndex = frameIndex
-        
-        -- Apply interpolation for smooth movement
-        self:InterpolateActivePlayback(ent)
     end
 
     self.LastFrameTime = now
 end
 
-function ENT:InterpolateActivePlayback(ent)
+--[[
+function ENT:InterpolateActivePlayback(ent, alpha)
     if not IsValid(ent) or not ent.IsBeingPlayedBack or not IsValid(ent.PlaybackBox) then
         return
     end
@@ -483,7 +500,7 @@ function ENT:InterpolateActivePlayback(ent)
     local phys = ent:GetPhysicsObject()
     if not IsValid(phys) then return end
     
-    local alpha = 1 -- TODO implement this properly
+    alpha = alpha or 1
     local easing_func = ActionRecorder.EasingFunctions[ent.PlaybackBox.Easing or "Linear"]
     if easing_func then
         alpha = math.Clamp(alpha, 0, 1)
@@ -593,18 +610,43 @@ function ENT:InterpolateSmoothReturn(ent)
         playbackBox.IsOneTimeSmoothReturn = false
     end
 end
+--]]
 
 function ENT:ApplyFrameData(ent, frame, basePos)
-    --ARLog("ApplyFrameData", basePos, frame.pos)
+    --ARLog("ApplyFrameData called for entity ", ent:EntIndex())
+    
+    -- Apply position and angle changes
     if frame.pos and frame.ang then
-        ent.TargetPos = frame.pos + basePos
-        ent.TargetAng = frame.ang
+        local targetPos = frame.pos + basePos
+        local targetAng = frame.ang
+        --ARLog("Moving entity to pos: ", targetPos, " ang: ", targetAng)
+        
+        -- Move the entity directly
+        local phys = ent:GetPhysicsObject()
+        if IsValid(phys) then
+            local params = {
+                pos = targetPos,
+                angle = targetAng,
+                maxspeed = 10000,
+                maxangular = 10000,
+                maxspeeddamp = 10000,
+                maxangulardamp = 10000,
+                dampfactor = 1,
+                teleportdistance = self.PhysicslessTeleport and 0.1 or 0,
+                deltaTime = FrameTime()
+            }
+            phys:Wake()
+            phys:ComputeShadowControl(params)
+        else
+            -- Fallback for entities without physics
+            ent:SetPos(targetPos)
+            ent:SetAngles(targetAng)
+        end
     else
         ARLog("ApplyFrameData NO pos OR angle", frame.pos, frame.ang)
-        ent.TargetPos = ent:GetPos()
-        ent.TargetAng = ent:GetAngles()
     end
 
+    -- Apply visual changes
     if frame.material then ent:SetMaterial(frame.material) end
     if frame.color then ent:SetColor(frame.color) end
     if frame.renderfx then ent:SetRenderFX(frame.renderfx) end
@@ -634,14 +676,6 @@ if CLIENT then
     end
 end
 
--- Handle smooth return for entities that need it
-hook.Add("Think", "ActionRecorder_SmoothReturn", function()
-    for _, ent in pairs(ents.GetAll()) do
-        if IsValid(ent) and ent.PlaybackBox and ent.PlaybackBox.IsOneTimeSmoothReturn then
-            ent.PlaybackBox:InterpolateSmoothReturn(ent)
-        end
-    end
-end)
 
 if SERVER then
     numpad.Register("ActionRecorder_Playback", function(ply, ent)
