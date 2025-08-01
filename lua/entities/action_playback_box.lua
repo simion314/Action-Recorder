@@ -633,7 +633,7 @@ function ENT:ApplyFrameData(ent, frame, basePos)
                 maxangulardamp = 10000,
                 dampfactor = 1,
                 teleportdistance = self.PhysicslessTeleport and 0.1 or 0,
-                deltaTime = FrameTime()
+                deltaTime = GLOBAL_TIMER_INTERVAL
             }
             phys:Wake()
             phys:ComputeShadowControl(params)
