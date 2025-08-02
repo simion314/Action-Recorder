@@ -45,12 +45,9 @@ function ENT:Initialize()
 
     if SERVER then
         self:SetupNumpad()
-        if WireLib then
-            self.Inputs = WireLib.CreateInputs(self, { "Play", "Stop", "PlaybackSpeed", "LoopMode" })
-            self.Outputs = WireLib.CreateOutputs(self, { "IsPlaying", "PlaybackSpeed", "Frame" })
-        end
+        ActionRecorder.Wire.SetupEntity(self)
     end
-    ARLog("Done initializing" )
+    --ARLog("Done initializing" )
 end
 
 function ENT:SetupNumpad()
@@ -95,7 +92,7 @@ function ENT:SetPlaybackData(data)
         ARLog("SetPlaybackData Attempt to set Empty data ", data)
         return
      end
-    ARLog("SetPlaybackData length ", #data)
+    --ARLog("SetPlaybackData length ", #data)
     self.PlaybackData = {}
     self.AnimationInfo = {}
     for id,frames in pairs(data) do
@@ -214,7 +211,7 @@ end
 
 
 function ENT:StartPlayback()
-    ARLog("StartPlayback")
+    --ARLog("StartPlayback")
     -- Capture initial positions/angles when playback starts
     if self.status ~= AR_ANIMATION_STATUS.PLAYING then -- Only capture if not already playing
         self.InitialPositions = {}
@@ -241,7 +238,7 @@ function ENT:StartPlayback()
      end
     -- Create the global timer if it doesn't exist
     if not timer.Exists(GLOBAL_PLAYBACK_TIMER) then
-        ARLog("Creating global timer")
+        --ARLog("Creating global timer")
         timer.Create(GLOBAL_PLAYBACK_TIMER, GLOBAL_TIMER_INTERVAL, 0, function()
             for box, _ in pairs(ActivePlaybackBoxes) do
                 if IsValid(box) then
@@ -257,27 +254,37 @@ function ENT:StartPlayback()
     for entIndex, _ in pairs(self.PlaybackData or {}) do
         self:SetupEntityPlayback(entIndex)
     end
-    ARLog("Finished StarPlayback")
+    --ARLog("Finished StarPlayback")
 end
 
 --- This function assumes all entities have same number of frames
 --TODO this could be optimized by storing the frames count in the box object when recording is done
 function ENT:getFramesCount()
-    -- Check if PlaybackData exists and is not empty
-    if not self.PlaybackData then
-        return 0
-    end
+    -- Legacy function - use GetMaxFrames() instead
+    return self:GetMaxFrames()
+end
 
-    -- Iterate over each entity index and its frames in PlaybackData
-    for _, info in pairs(self.AnimationInfo) do
-        -- If frames is not nil and is a table with a length, return its count
-        if info and type(info) == "table" and info.frameCount > 0 then
-            return info.frameCount
+function ENT:GetCurrentFrameIndex()
+    -- Return the minimum frame across all animated entities
+    local minFrame = math.huge
+    for _, info in pairs(self.AnimationInfo or {}) do
+        if info and info.currentFrameIndex then
+            minFrame = math.min(minFrame, info.currentFrameIndex)
+            --ARLog("min frame is ", minFrame)f
         end
     end
+    return minFrame == math.huge and 1 or minFrame
+end
 
-    -- If no frames were found for any entity, return 0
-    return 0
+function ENT:GetMaxFrames()
+    -- Return the maximum frame count across all entities
+    local maxFrames = 0
+    for _, info in pairs(self.AnimationInfo or {}) do
+        if info and info.frameCount then
+            maxFrames = math.max(maxFrames, info.frameCount)
+        end
+    end
+    return maxFrames
 end
 function ENT:StopPlaybackIfNeeded()
     local allEntitiesFinished = true
@@ -333,16 +340,16 @@ function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
             --ARLog("Not at start, decrementing index")
             nextFrameIndex = math.max(1, nextFrameIndex - amount)
         else
-            ARLog("At start, handling loop modes")
+            --ARLog("At start, handling loop modes")
             if self.LoopMode == AR_LOOP_MODE.NO_LOOP then
                 ARLog("No loop mode, entity finished")
                 return -1
             elseif self.LoopMode == AR_LOOP_MODE.PING_PONG then
-                ARLog("Ping pong mode, reversing direction")
+                --ARLog("Ping pong mode, reversing direction")
                 self.PlaybackDirection = self.PlaybackDirection * (-1)
                 nextFrameIndex = 1
             elseif self.LoopMode == AR_LOOP_MODE.LOOP then
-                ARLog("Loop mode, resetting to end")
+                --ARLog("Loop mode, resetting to end")
                 nextFrameIndex = frameCount
             else
                 ARLog("Unsupported Loop mode in advanceFrames")
@@ -381,7 +388,7 @@ function ENT:calculateNextFrame(currentFrameIndex, framesCount)
 end
 
 function ENT:SetupEntityPlayback(entIndex)
-    ARLog("SetupEntityPlayback")
+    --ARLog("SetupEntityPlayback")
     local ent = Entity(entIndex)
     if not IsValid(ent) then return end
     --if IsPropControlledByOtherBox(ent, self) then return end -- This is only for replaying one box at a time.
@@ -472,7 +479,7 @@ function ENT:ProcessPlayback()
          -- Check if entity finished
          if frameIndex == -1 then
              info.status = AR_ANIMATION_STATUS.FINISHED
-             ARLog("Entity " .. entIndex .. " marked as finished")
+             --ARLog("Entity " .. entIndex .. " marked as finished")
              -- Check if all entities are finished and stop playback if needed
              self:StopPlaybackIfNeeded()
              continue
@@ -694,35 +701,120 @@ if SERVER then
     end
 end
 
-function ENT:TriggerInput(iname, value)
-    if iname == "Play" then
-        if value ~= 0 then
-            self:StartPlayback(true)
-        else
+function ENT:OnDuplicated()
+    -- Re-setup wire integration when entity is duplicated
+    if WireLib then
+        timer.Simple(0.1, function()
+            if IsValid(self) then
+                --ARLog("Re-initializing wire integration after duplication")
+                ActionRecorder.Wire.SetupEntity(self)
+            end
+        end)
+    end
+end
 
+function ENT:TriggerInput(iname, value)
+    if not WireLib then return end
+    
+    local handlers = {
+        ["Play"] = function(val) 
+            if val ~= 0 then 
+                self:StartPlayback(true) 
+            else 
+                self:StopPlayback(true) 
+            end 
+        end,
+        
+        ["Stop"] = function(val) 
+            if val ~= 0 then self:StopPlayback(true) end 
+        end,
+        
+        ["PlaybackSpeed"] = function(val) 
+            self.PlaybackSpeed = math.Clamp(val, -10, 10) 
+        end,
+        
+        ["LoopMode"] = function(val) 
+            local validMode = ActionRecorder.Wire.ValidateLoopMode(val)
+            if validMode then
+                self.LoopMode = validMode
+            else
+                ActionRecorder.Wire.Error(self, "Invalid loop mode: " .. tostring(val))
+            end
+        end,
+        
+        ["Reset"] = function(val) 
+            if val ~= 0 then self:ResetPlayback() end 
+        end,
+        
+        ["SetFrame"] = function(val)
+            if 0 == val then
+                return
+            end
+            --ARLog("SetFrame input val is ", val)
+            self:SetCurrentFrame(math.max(1, val))
         end
-    elseif iname == "Stop" and value ~= 0 then
-        self:StopPlayback(true)
-    elseif iname == "PlaybackSpeed" then
-        self.PlaybackSpeed = value
-    elseif iname == "LoopMode" then
-        self.LoopMode = value
+    }
+    
+    local handler = handlers[iname]
+    if handler then 
+        handler(value) 
+    else
+        ActionRecorder.Wire.Error(self, "Unknown input: " .. tostring(iname))
     end
 end
 
 function ENT:Think()
-    if not WireLib then return end
-
-    if self.status ~= self.lastStatus then
-        WireLib.TriggerOutput(self, "IsPlaying", self.status == AR_ANIMATION_STATUS.PLAYING and 1 or 0)
-        self.lastStatus = self.status
+    if not WireLib or not self.WireState then return end
+    
+    local now = CurTime()
+    
+    -- Throttle wire outputs to 10Hz instead of 50Hz for better performance
+    if now - self.WireState.outputThrottle < 0.1 then
+        self:NextThink(now + 0.02)
+        return true
     end
-
-    if self.status == AR_ANIMATION_STATUS.PLAYING then
-        WireLib.TriggerOutput(self, "PlaybackSpeed", self.PlaybackSpeed)
-        WireLib.TriggerOutput(self, "Frame", self:getFramesCount() or 0) -- TODO this look wrong , if we have multple entities then frame count is different
-    end
-
-    self:NextThink(CurTime())
+    self.WireState.outputThrottle = now
+    
+    -- Update wire outputs using the centralized system
+    ActionRecorder.Wire.UpdateOutputs(self)
+    
+    self:NextThink(now + 0.02)
     return true
+end
+
+function ENT:ResetPlayback()
+    --ARLog("ResetPlayback called via wire input")
+    self:StopPlayback(true)
+    
+    -- Reset all animation info to frame 1
+    for _, info in pairs(self.AnimationInfo or {}) do
+        if info then
+            info.currentFrameIndex = 1
+            info.status = AR_ANIMATION_STATUS.FINISHED
+        end
+    end
+    
+    -- Update wire outputs immediately to reflect the reset
+    if self.WireState then
+        ActionRecorder.Wire.UpdateOutputs(self)
+    end
+end
+
+function ENT:SetCurrentFrame(frame)
+    --ARLog("SetCurrentFrame called with frame: " .. tostring(frame))
+    
+    -- Set all entities to the specified frame
+    for _, info in pairs(self.AnimationInfo or {}) do
+        if info and info.frameCount then
+            info.currentFrameIndex = math.Clamp(frame, 1, info.frameCount)
+        end
+    end
+    
+    -- Apply the frame data immediately by processing a single frame
+    self:ProcessPlayback()
+    
+    -- Update wire outputs immediately
+    if self.WireState then
+        ActionRecorder.Wire.UpdateOutputs(self)
+    end
 end
