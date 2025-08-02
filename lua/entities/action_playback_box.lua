@@ -34,8 +34,6 @@ function ENT:Initialize()
     self.NumpadKey = self.NumpadKey or 5
     self.IsOneTimeSmoothReturn = false
     self.IsActivated = false
-    self.InitialPositions = {}
-    self.InitialAngles = {}
     self.ShouldSmoothReturn = false
     self.PhysicslessTeleport = false
 
@@ -104,7 +102,9 @@ function ENT:SetPlaybackData(data)
             frameCount = #frames,
             direction = AR_PLAYBACK_DIRECTION.FORWARD,
             status = AR_ANIMATION_STATUS.NOT_STARTED,
-            currentFrameIndex = 1
+            currentFrameIndex = 1,
+            initialPos = nil,
+            initialAng = nil
         }
    end
    self.status = AR_ANIMATION_STATUS.NOT_STARTED
@@ -214,13 +214,15 @@ function ENT:StartPlayback()
     --ARLog("StartPlayback")
     -- Capture initial positions/angles when playback starts
     if self.status ~= AR_ANIMATION_STATUS.PLAYING then -- Only capture if not already playing
-        self.InitialPositions = {}
-        self.InitialAngles = {}
         for entIndex, frames in pairs(self.PlaybackData or {}) do
             local ent = Entity(entIndex)
             if IsValid(ent) then
-                self.InitialPositions[entIndex] = ent:GetPos()
-                self.InitialAngles[entIndex] = ent:GetAngles()
+                local info = self.AnimationInfo[entIndex]
+                if info then
+                    info.initialPos = ent:GetPos()
+                    ARLog("initial pos ", info.initialPos)
+                    info.initialAng = ent:GetAngles()
+                end
             end
         end
     end
@@ -319,12 +321,12 @@ function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
             --ARLog("Not at end, incrementing index")
             nextFrameIndex = math.min(nextFrameIndex + amount, frameCount)
         else
-            ARLog("At end, handling loop modes")
+            --ARLog("At end, handling loop modes")
             if self.LoopMode == AR_LOOP_MODE.NO_LOOP then
                 ARLog("No loop mode, entity finished")
                 return -1
             elseif self.LoopMode == AR_LOOP_MODE.PING_PONG then
-                ARLog("Ping pong mode, reversing direction")
+                --ARLog("Ping pong mode, reversing direction")
                 self.PlaybackDirection = self.PlaybackDirection * (-1)
                 nextFrameIndex = frameCount
             elseif self.LoopMode == AR_LOOP_MODE.LOOP then
@@ -408,7 +410,12 @@ function ENT:SetupEntityPlayback(entIndex)
 
     local i = info.currentFrameIndex
 
-    local basePos = (self.PlaybackType == AR_PLAYBACK_TYPE.RELATIVE and frames[i] and frames[i].pos) and (ent:GetPos() - frames[i].pos) or Vector(0,0,0)
+    local basePos = Vector(0,0,0)
+    if self.PlaybackType == AR_PLAYBACK_TYPE.RELATIVE and frames[1] and frames[1].pos then
+        if info.initialPos then
+            basePos = info.initialPos - frames[1].pos
+        end
+    end
 
     if ent.IsBeingPlayedBack and ent.PlaybackBox and ent.PlaybackBox ~= self then
         ent.IsBeingPlayedBack = false
@@ -488,7 +495,12 @@ function ENT:ProcessPlayback()
         -- Calculate the base position
         local frame = frames[frameIndex]
         if frame then
-            local basePos = (self.PlaybackType == AR_PLAYBACK_TYPE.RELATIVE and frame and frame.pos) and (ent:GetPos() - frame.pos) or Vector(0,0,0)
+            local basePos = Vector(0,0,0)
+            if self.PlaybackType == AR_PLAYBACK_TYPE.RELATIVE and frame.pos then
+                if info.initialPos and frames[1] and frames[1].pos then
+                    basePos = info.initialPos - frames[1].pos
+                end
+            end
 
             self:ApplyFrameData(ent, frame, basePos)
         end
