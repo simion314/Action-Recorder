@@ -211,7 +211,8 @@ end
 
 
 function ENT:StartPlayback()
-    --ARLog("StartPlayback")
+    ARLog("StartPlayback called")
+    ARLog("PlaybackData contains: " .. table.Count(self.PlaybackData or {}) .. " entities")
     -- Capture initial positions/angles when playback starts
     if self.status ~= AR_ANIMATION_STATUS.PLAYING then -- Only capture if not already playing
         for entIndex, frames in pairs(self.PlaybackData or {}) do
@@ -220,8 +221,9 @@ function ENT:StartPlayback()
                 local info = self.AnimationInfo[entIndex]
                 if info then
                     info.initialPos = ent:GetPos()
-                    ARLog("initial pos ", info.initialPos)
+                    ARLog("Entity " .. entIndex .. " initial pos: ", info.initialPos)
                     info.initialAng = ent:GetAngles()
+                    ARLog("Entity " .. entIndex .. " frame count: ", info.frameCount)
                 end
             end
         end
@@ -237,6 +239,7 @@ function ENT:StartPlayback()
     for _, info in pairs(self.AnimationInfo) do
         info.status = AR_ANIMATION_STATUS.PLAYING
         info.currentFrameIndex = 1
+        info.LastMoveTime = CurTime()
      end
     -- Create the global timer if it doesn't exist
     if not timer.Exists(GLOBAL_PLAYBACK_TIMER) then
@@ -253,10 +256,12 @@ function ENT:StartPlayback()
     end
 
     -- Initialize playback for all entities
+    ARLog("Initializing playback for " .. table.Count(self.PlaybackData or {}) .. " entities")
     for entIndex, _ in pairs(self.PlaybackData or {}) do
+        ARLog("Setting up entity " .. entIndex)
         self:SetupEntityPlayback(entIndex)
     end
-    --ARLog("Finished StarPlayback")
+    ARLog("Finished StartPlayback")
 end
 
 --- This function assumes all entities have same number of frames
@@ -302,6 +307,7 @@ function ENT:StopPlaybackIfNeeded()
     end
 end
 function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
+    --ARLog("advanceFrames called: amount=" .. amount .. ", frameCount=" .. frameCount .. ", currentIndex=" .. currentFrameIndex)
 
     if frameCount <= 1 then
         ARLog("Only one frame available, marking entity as finished.")
@@ -363,24 +369,53 @@ function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
     return nextFrameIndex
 end
 
-function ENT:calculateNextFrame(currentFrameIndex, framesCount)
-    local speed = self.PlaybackSpeed or 1
-    --ARLog("calculateNextFrame: speed=", speed, " currentFrame=", currentFrameIndex, " totalFrames=", framesCount)
+function ENT:GetSpeed(currentFrameIndex, frameCount)
+    ARLog("GetSpeed called - Easing: " .. tostring(self.Easing) .. ", Frame: " .. currentFrameIndex .. "/" .. frameCount)
+    -- Calculate progress for THIS specific entity (0 to 1)
+    local progress = currentFrameIndex / frameCount
+    local minSpeed = 0.1
+    local speed = minSpeed
+    if not self.Easing then
+        --ARLog("Using no easing, returning base speed: " .. self.PlaybackSpeed)
+        return self.PlaybackSpeed
+    end
+    local easing_func = ActionRecorder.EasingFunctions[self.Easing]
+    if not easing_func then
+        ARLog("Easing function not found ", self.Easing)
+        speed = self.PlaybackSpeed
+    else
+        local y = easing_func(progress)
+        speed = self.PlaybackSpeed * y
+        ARLog("Easing function value for , is and speed ", progress, y, speed)
+    end
+   if speed < minSpeed then
+        speed = minSpeed
+   end
+        
+   --ARLog("Easing calculation - Current: " .. speed)
+   return speed
+end
+
+
+function ENT:calculateNextFrame(currentFrameIndex, framesCount, lastMoveTime)
+    local speed = self:GetSpeed(currentFrameIndex, framesCount)
+    --ARLog("calculateNextFrame: speed=" .. speed .. ", currentFrame=" .. currentFrameIndex .. ", totalFrames=" .. framesCount)
     if (speed == 0) then
         ARLog("Speed is zero for ") -- TODO add the box id in the message
         return 1 -- move object at first frame if he set speed to 0
     end
     local moveTimeInterval = GLOBAL_TIMER_INTERVAL / math.abs(speed) --dividing with a num less then 1 will increase the numerator
-    local lastMoveTime = self.LastFrameTime
+
     local now = CurTime()
     local timeSinceLastMove = now - lastMoveTime
     -- if speed is small we might not need to move to next frame
     if (math.abs(speed) < 1) then
-        ARLog("speed < 1  ")
+        ARLog("speed < 1: " .. speed .. ", timeSinceLastMove: " .. timeSinceLastMove .. ", moveTimeInterval: " .. moveTimeInterval)
         if timeSinceLastMove < moveTimeInterval then
-             ARLog(" returning sae frame index   ", timeSinceLastMove, moveTimeInterval)
+             ARLog("returning same frame index " .. currentFrameIndex)
             return currentFrameIndex
         else -- we need to advance 1 frame
+           --ARLog("advancing 1 frame from " .. currentFrameIndex)
            return self:advanceFrames(1, framesCount, currentFrameIndex)
         end
     else --case speed is greate then 1 in abs value
@@ -390,7 +425,7 @@ function ENT:calculateNextFrame(currentFrameIndex, framesCount)
 end
 
 function ENT:SetupEntityPlayback(entIndex)
-    --ARLog("SetupEntityPlayback")
+    ARLog("SetupEntityPlayback for entity " .. entIndex)
     local ent = Entity(entIndex)
     if not IsValid(ent) then return end
     --if IsPropControlledByOtherBox(ent, self) then return end -- This is only for replaying one box at a time.
@@ -425,9 +460,14 @@ function ENT:SetupEntityPlayback(entIndex)
     if frames[i].pos and frames[i].ang then
         ent.TargetPos = frames[i].pos + basePos
         ent.TargetAng = frames[i].ang
+        ARLog("Entity " .. entIndex .. " target pos set to: " .. tostring(ent.TargetPos))
+        
+        -- Immediately apply the first frame position
+        self:ApplyFrameData(ent, frames[i], basePos)
     else
         ent.TargetPos = ent:GetPos()
         ent.TargetAng = ent:GetAngles()
+        ARLog("Entity " .. entIndex .. " no frame data, using current pos: " .. tostring(ent.TargetPos))
     end
     ent.IsBeingPlayedBack = true
     ent.PlaybackBox = self
@@ -467,8 +507,8 @@ function ENT:ProcessPlayback()
             ARLog("This entity has zero frames, should not have been added ", entIndex)
             continue
          end
-         local frameIndex = self:calculateNextFrame(info.currentFrameIndex, frameCount)
-         --ARLog("Entity ", entIndex, " calculated frameIndex: ", frameIndex, " (was ", info.currentFrameIndex, ")")
+         local frameIndex = self:calculateNextFrame(info.currentFrameIndex, frameCount, info.LastMoveTime)
+         --ARLog("Entity " .. entIndex .. " calculated frameIndex: " .. frameIndex .. " (was " .. info.currentFrameIndex .. ")")
          if (frameIndex == info.currentFrameIndex) then
                 --ARLog("no move, probably speed is low")
                 -- Calculate interpolation alpha for slow speeds
@@ -480,8 +520,8 @@ function ENT:ProcessPlayback()
                     self:InterpolateActivePlayback(ent, alpha)
                 end
                 --]]
-                continue
-            end
+            continue
+         end
          
          -- Check if entity finished
          if frameIndex == -1 then
@@ -503,143 +543,20 @@ function ENT:ProcessPlayback()
             end
 
             self:ApplyFrameData(ent, frame, basePos)
+            info.LastMoveTime = now
         end
         info.currentFrameIndex = frameIndex
-    end
+    end --end for
 
     self.LastFrameTime = now
 end
 
---[[
-function ENT:InterpolateActivePlayback(ent, alpha)
-    if not IsValid(ent) or not ent.IsBeingPlayedBack or not IsValid(ent.PlaybackBox) then
-        return
-    end
-    
-    local phys = ent:GetPhysicsObject()
-    if not IsValid(phys) then return end
-    
-    alpha = alpha or 1
-    local easing_func = ActionRecorder.EasingFunctions[ent.PlaybackBox.Easing or "Linear"]
-    if easing_func then
-        alpha = math.Clamp(alpha, 0, 1)
-        local original_alpha = alpha
-        local t = alpha
-        t = t + ent.PlaybackBox.EasingOffset
-        t = t * ent.PlaybackBox.EasingFrequency
-
-        local eased_alpha = easing_func(t)
-
-        if eased_alpha ~= eased_alpha or math.abs(eased_alpha) == math.huge then
-            eased_alpha = original_alpha
-        end
-
-        if ent.PlaybackBox.EasingInvert then
-            eased_alpha = 1 - eased_alpha
-        end
-
-        alpha = Lerp(ent.PlaybackBox.EasingAmplitude, original_alpha, eased_alpha)
-
-        if alpha ~= alpha or math.abs(alpha) == math.huge then
-            alpha = eased_alpha
-        end
-    end
-
-    local interpolatedPos = LerpVector(alpha, ent:GetPos(), ent.TargetPos)
-    local interpolatedAng = LerpAngle(alpha, ent:GetAngles(), ent.TargetAng)
-
-    local params = {
-        pos = interpolatedPos,
-        angle = interpolatedAng,
-        maxspeed = 10000,
-        maxangular = 10000,
-        maxspeeddamp = 10000,
-        maxangulardamp = 10000,
-        dampfactor = 1,
-        teleportdistance = ent.PlaybackBox and ent.PlaybackBox.PhysicslessTeleport and 0.1 or 0,
-        deltaTime = FrameTime()
-    }
-    phys:Wake()
-    phys:ComputeShadowControl(params)
-end
-
-function ENT:InterpolateSmoothReturn(ent)
-    if not IsValid(ent) or not ent.PlaybackBox or not ent.PlaybackBox.IsOneTimeSmoothReturn then
-        return
-    end
-    
-    if ent.PlaybackBox.status == AR_ANIMATION_STATUS.PLAYING then
-        return
-    end
-    
-    local playbackBox = ent.PlaybackBox
-    local initialPos = playbackBox.InitialPositions[ent:EntIndex()]
-    local initialAng = playbackBox.InitialAngles[ent:EntIndex()]
-
-    if not initialPos or not initialAng then return end
-    
-    local phys = ent:GetPhysicsObject()
-    if not IsValid(phys) then return end
-
-    local alpha = 1 -- TODO implement this properly
-    local easing_func = ActionRecorder.EasingFunctions[playbackBox.Easing or "Linear"]
-    if easing_func then
-        alpha = math.Clamp(alpha, 0, 1)
-        local original_alpha = alpha
-
-        local t = alpha
-        t = t + playbackBox.EasingOffset
-        t = t * playbackBox.EasingFrequency
-
-        local eased_alpha = easing_func(t)
-
-        if eased_alpha ~= eased_alpha or math.abs(eased_alpha) == math.huge then
-            eased_alpha = original_alpha
-        end
-
-        if playbackBox.EasingInvert then
-            eased_alpha = 1 - eased_alpha
-        end
-
-        alpha = Lerp(playbackBox.EasingAmplitude, original_alpha, eased_alpha)
-
-        if alpha ~= alpha or math.abs(alpha) == math.huge then
-            alpha = eased_alpha
-        end
-    end
-
-    local interpolatedPos = LerpVector(alpha, ent:GetPos(), initialPos)
-    local interpolatedAng = LerpAngle(alpha, ent:GetAngles(), initialAng)
-
-    local params = {
-        pos = interpolatedPos,
-        angle = interpolatedAng,
-        maxspeed = 10000,
-        maxangular = 10000,
-        maxspeeddamp = 10000,
-        maxangulardamp = 10000,
-        dampfactor = 1,
-        teleportdistance = playbackBox and playbackBox.PhysicslessTeleport and 0.1 or 0,
-        deltaTime = FrameTime()
-    }
-    phys:Wake()
-    phys:ComputeShadowControl(params)
-
-    if alpha >= 1 then
-        playbackBox.IsOneTimeSmoothReturn = false
-    end
-end
---]]
-
 function ENT:ApplyFrameData(ent, frame, basePos)
-    --ARLog("ApplyFrameData called for entity ", ent:EntIndex())
-    
     -- Apply position and angle changes
     if frame.pos and frame.ang then
         local targetPos = frame.pos + basePos
         local targetAng = frame.ang
-        --ARLog("Moving entity to pos: ", targetPos, " ang: ", targetAng)
-        
+
         -- Move the entity directly
         local phys = ent:GetPhysicsObject()
         if IsValid(phys) then
