@@ -412,8 +412,11 @@ function ENT:calculateNextFrame(currentFrameIndex, framesCount, lastMoveTime)
     if (math.abs(speed) < 1) then
         ARLog("speed < 1: " .. speed .. ", timeSinceLastMove: " .. timeSinceLastMove .. ", moveTimeInterval: " .. moveTimeInterval)
         if timeSinceLastMove < moveTimeInterval then
-             ARLog("returning same frame index " .. currentFrameIndex)
-            return currentFrameIndex
+            -- Return decimal frame index for smooth interpolation
+            local progress = timeSinceLastMove / moveTimeInterval
+            local decimalFrameIndex = currentFrameIndex + progress
+            ARLog("returning decimal frame index " .. decimalFrameIndex)
+            return decimalFrameIndex
         else -- we need to advance 1 frame
            --ARLog("advancing 1 frame from " .. currentFrameIndex)
            return self:advanceFrames(1, framesCount, currentFrameIndex)
@@ -476,6 +479,57 @@ end
 function ENT:calculateDirection()
     return (self.PlaybackDirection * (self.PlaybackSpeed < 0 and -1 or 1))
 end
+
+function interpolateFrame(frames, decimalIndex, direction)
+    if math.floor(decimalIndex) == decimalIndex then
+        return frames[decimalIndex]
+    end
+    
+    local frameIndex = math.floor(math.abs(decimalIndex))
+    local alpha = decimalIndex - frameIndex
+    
+    -- Get current and next frame indices based on direction
+    local currentFrameIndex = frameIndex
+    local nextFrameIndex
+    
+    if direction > 0 then
+        nextFrameIndex = math.min(frameIndex + 1, #frames)
+    else
+        nextFrameIndex = math.max(frameIndex - 1, 1)
+    end
+    
+    local currentFrame = frames[currentFrameIndex]
+    local nextFrame = frames[nextFrameIndex]
+    
+    if not currentFrame or not nextFrame then
+        return currentFrame or nextFrame
+    end
+    
+    -- Clone current frame
+    local interpolatedFrame = table.Copy(currentFrame)
+    
+    -- Interpolate position
+    if currentFrame.pos and nextFrame.pos then
+        interpolatedFrame.pos = LerpVector(alpha, currentFrame.pos, nextFrame.pos)
+    end
+    
+    -- Interpolate angles
+    if currentFrame.ang and nextFrame.ang then
+        interpolatedFrame.ang = LerpAngle(alpha, currentFrame.ang, nextFrame.ang)
+    end
+    
+    -- Interpolate color if present
+    if currentFrame.color and nextFrame.color then
+        interpolatedFrame.color = Color(
+            Lerp(alpha, currentFrame.color.r, nextFrame.color.r),
+            Lerp(alpha, currentFrame.color.g, nextFrame.color.g),
+            Lerp(alpha, currentFrame.color.b, nextFrame.color.b),
+            Lerp(alpha, currentFrame.color.a, nextFrame.color.a)
+        )
+    end
+    
+    return interpolatedFrame
+end
 function ENT:ProcessPlayback()
     if self.status ~= AR_ANIMATION_STATUS.PLAYING then
         ARLog("Wrong status in process playback: ", self.status)
@@ -510,16 +564,6 @@ function ENT:ProcessPlayback()
          local frameIndex = self:calculateNextFrame(info.currentFrameIndex, frameCount, info.LastMoveTime)
          --ARLog("Entity " .. entIndex .. " calculated frameIndex: " .. frameIndex .. " (was " .. info.currentFrameIndex .. ")")
          if (frameIndex == info.currentFrameIndex) then
-                --ARLog("no move, probably speed is low")
-                -- Calculate interpolation alpha for slow speeds
-                --[[
-                if self.PlaybackSpeed < 1 and self.PlaybackSpeed ~= 0 then
-                    local moveTimeInterval = GLOBAL_TIMER_INTERVAL / math.abs(self.PlaybackSpeed)
-                    local timeSinceLastMove = now - self.LastFrameTime
-                    local alpha = math.min(1, timeSinceLastMove / moveTimeInterval)
-                    self:InterpolateActivePlayback(ent, alpha)
-                end
-                --]]
             continue
          end
          
@@ -532,8 +576,17 @@ function ENT:ProcessPlayback()
              continue
          end
 
-        -- Calculate the base position
-        local frame = frames[frameIndex]
+        -- Calculate the base position and handle decimal frame indices
+        local frame
+        if math.floor(frameIndex) == frameIndex then
+            -- Whole number frame index
+            frame = frames[frameIndex]
+        else
+            -- Decimal frame index - use interpolation
+            local direction = self:calculateDirection()
+            frame = interpolateFrame(frames, frameIndex, direction)
+        end
+        
         if frame then
             local basePos = Vector(0,0,0)
             if self.PlaybackType == AR_PLAYBACK_TYPE.RELATIVE and frame.pos then
