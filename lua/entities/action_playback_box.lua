@@ -231,6 +231,7 @@ function ENT:StartPlayback()
     self.LastFrameTime = CurTime()
     self.status = AR_ANIMATION_STATUS.PLAYING
     self.PlaybackDirection = AR_PLAYBACK_DIRECTION.FORWARD
+    self.IsOneTimeSmoothReturn = false
     self.IsActivated = true
 
     -- Add this box to the active playback boxes
@@ -334,10 +335,15 @@ function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
             elseif self.LoopMode == AR_LOOP_MODE.PING_PONG then
                 --ARLog("Ping pong mode, reversing direction")
                 self.PlaybackDirection = self.PlaybackDirection * (-1)
-                nextFrameIndex = frameCount
+                nextFrameIndex = frameCount - 1
             elseif self.LoopMode == AR_LOOP_MODE.LOOP then
                 ARLog("Loop mode, resetting to start")
                 nextFrameIndex = 1
+            elseif self.LoopMode == AR_LOOP_MODE.NO_LOOP_SMOOTH then
+                --ARLog("No Loop Smooth mode, reversing direction for one-time return")
+                self.PlaybackDirection = self.PlaybackDirection * (-1)
+                self.IsOneTimeSmoothReturn = true
+                nextFrameIndex = frameCount - 1
             else
                 ARLog("Unsupported Loop mode in advanceFrames")
             end
@@ -355,12 +361,13 @@ function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
             elseif self.LoopMode == AR_LOOP_MODE.PING_PONG then
                 --ARLog("Ping pong mode, reversing direction")
                 self.PlaybackDirection = self.PlaybackDirection * (-1)
-                nextFrameIndex = 1
+                nextFrameIndex = 2
             elseif self.LoopMode == AR_LOOP_MODE.LOOP then
                 --ARLog("Loop mode, resetting to end")
                 nextFrameIndex = frameCount
-            else
-                ARLog("Unsupported Loop mode in advanceFrames")
+            elseif self.LoopMode == AR_LOOP_MODE.NO_LOOP_SMOOTH and self.IsOneTimeSmoothReturn then
+                --ARLog("No Loop Smooth mode, finished one-time return")
+                return -1 -- Animation finished
             end
         end
     end
@@ -402,29 +409,23 @@ function ENT:calculateNextFrame(currentFrameIndex, framesCount, lastMoveTime)
     --ARLog("calculateNextFrame: speed=" .. speed .. ", currentFrame=" .. currentFrameIndex .. ", totalFrames=" .. framesCount)
     if (speed == 0) then
         ARLog("Speed is zero for ") -- TODO add the box id in the message
-        return 1 -- move object at first frame if he set speed to 0
+        return currentFrameIndex -- Keep the current frame if speed is zero
     end
-    local moveTimeInterval = GLOBAL_TIMER_INTERVAL / math.abs(speed) --dividing with a num less then 1 will increase the numerator
 
+    local moveTimeInterval = GLOBAL_TIMER_INTERVAL / math.abs(speed)
     local now = CurTime()
     local timeSinceLastMove = now - lastMoveTime
-    -- if speed is small we might not need to move to next frame
-    if (math.abs(speed) < 1) then
-        ARLog("speed < 1: " .. speed .. ", timeSinceLastMove: " .. timeSinceLastMove .. ", moveTimeInterval: " .. moveTimeInterval)
-        if timeSinceLastMove < moveTimeInterval then
-            -- Return decimal frame index for smooth interpolation
-            local progress = timeSinceLastMove / moveTimeInterval
-            local decimalFrameIndex = currentFrameIndex + progress
-            ARLog("returning decimal frame index " .. decimalFrameIndex)
-            return decimalFrameIndex
-        else -- we need to advance 1 frame
-           --ARLog("advancing 1 frame from " .. currentFrameIndex)
-           return self:advanceFrames(1, framesCount, currentFrameIndex)
-        end
-    else --case speed is greate then 1 in abs value
-        local framesToMove = math.floor(timeSinceLastMove / moveTimeInterval)
-        return self:advanceFrames(framesToMove, framesCount, currentFrameIndex)
+
+    if timeSinceLastMove < moveTimeInterval then
+        return currentFrameIndex -- Not enough time has passed to advance to the next frame
     end
+
+    local framesToMove = math.floor(timeSinceLastMove / moveTimeInterval)
+    if framesToMove == 0 then
+        framesToMove = 1 -- Ensure at least one frame is advanced
+    end
+
+    return self:advanceFrames(framesToMove, framesCount, currentFrameIndex)
 end
 
 function ENT:SetupEntityPlayback(entIndex)
@@ -477,56 +478,7 @@ function ENT:calculateDirection()
     return (self.PlaybackDirection * (self.PlaybackSpeed < 0 and -1 or 1))
 end
 
-function interpolateFrame(frames, decimalIndex, direction)
-    if math.floor(decimalIndex) == decimalIndex then
-        return frames[decimalIndex]
-    end
-    
-    local frameIndex = math.floor(math.abs(decimalIndex))
-    local alpha = decimalIndex - frameIndex
-    
-    -- Get current and next frame indices based on direction
-    local currentFrameIndex = frameIndex
-    local nextFrameIndex
-    
-    if direction > 0 then
-        nextFrameIndex = math.min(frameIndex + 1, #frames)
-    else
-        nextFrameIndex = math.max(frameIndex - 1, 1)
-    end
-    
-    local currentFrame = frames[currentFrameIndex]
-    local nextFrame = frames[nextFrameIndex]
-    
-    if not currentFrame or not nextFrame then
-        return currentFrame or nextFrame
-    end
-    
-    -- Clone current frame
-    local interpolatedFrame = table.Copy(currentFrame)
-    
-    -- Interpolate position
-    if currentFrame.pos and nextFrame.pos then
-        interpolatedFrame.pos = LerpVector(alpha, currentFrame.pos, nextFrame.pos)
-    end
-    
-    -- Interpolate angles
-    if currentFrame.ang and nextFrame.ang then
-        interpolatedFrame.ang = LerpAngle(alpha, currentFrame.ang, nextFrame.ang)
-    end
-    
-    -- Interpolate color if present
-    if currentFrame.color and nextFrame.color then
-        interpolatedFrame.color = Color(
-            Lerp(alpha, currentFrame.color.r, nextFrame.color.r),
-            Lerp(alpha, currentFrame.color.g, nextFrame.color.g),
-            Lerp(alpha, currentFrame.color.b, nextFrame.color.b),
-            Lerp(alpha, currentFrame.color.a, nextFrame.color.a)
-        )
-    end
-    
-    return interpolatedFrame
-end
+
 function ENT:ProcessPlayback()
     if self.status ~= AR_ANIMATION_STATUS.PLAYING then
         ARLog("Wrong status in process playback: ", self.status)
@@ -574,15 +526,7 @@ function ENT:ProcessPlayback()
          end
 
         -- Calculate the base position and handle decimal frame indices
-        local frame
-        if math.floor(frameIndex) == frameIndex then
-            -- Whole number frame index
-            frame = frames[frameIndex]
-        else
-            -- Decimal frame index - use interpolation
-            local direction = self:calculateDirection()
-            frame = interpolateFrame(frames, frameIndex, direction)
-        end
+        local frame = frames[frameIndex]
         
         if frame then
             local basePos = Vector(0,0,0)
