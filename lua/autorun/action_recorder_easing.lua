@@ -1,5 +1,6 @@
 if not ActionRecorder then ActionRecorder = {} end
 ActionRecorder.EasingFunctions = {
+    ["None"] = function(t) return 1 end,
     ["Linear"] = function(t) return t end,
     ["EaseInSine"] = function(t) return 1 - math.cos((t * math.pi) / 2) end,
     ["EaseOutSine"] = function(t) return math.sin((t * math.pi) / 2) end,
@@ -26,11 +27,6 @@ ActionRecorder.EasingFunctions = {
     ["EaseInOutCirc"] = function(t)
         return t < 0.5 and (1 - math.sqrt(1 - math.pow(2 * t, 2))) / 2 or (math.sqrt(1 - math.pow(-2 * t + 2, 2)) + 1) / 2
     end,
-    ["EaseInBack"] = function(t)
-        local c1 = 1.70158
-        local c3 = c1 + 1
-        return c3 * t * t * t - c1 * t * t
-    end,
     ["EaseOutBack"] = function(t)
         local c1 = 1.70158
         local c3 = c1 + 1
@@ -40,10 +36,6 @@ ActionRecorder.EasingFunctions = {
         local c1 = 1.70158
         local c2 = c1 * 1.525
         return t < 0.5 and (math.pow(2 * t, 2) * ((c2 + 1) * 2 * t - c2)) / 2 or (math.pow(2 * t - 2, 2) * ((c2 + 1) * (t * 2 - 2) + c2) + 2) / 2
-    end,
-    ["EaseInElastic"] = function(t)
-        local c4 = (2 * math.pi) / 3
-        return t == 0 and 0 or t == 1 and 1 or -math.pow(2, 10 * t - 10) * math.sin((t * 10 - 10.75) * c4)
     end,
     ["EaseOutElastic"] = function(t)
         local c4 = (2 * math.pi) / 3
@@ -76,7 +68,6 @@ ActionRecorder.EasingFunctions = {
     ["SawWave"] = function(t) return t end,
     ["TriangleWave"] = function(t) return math.abs((t * 2) - 1) end,
     ["SquareWave"] = function(t) return t >= 0.5 and 1 or 0 end,
-    ["TanWave"] = function(t) return (math.tan((t * 2 - 1) * math.pi / 4) + 1) / 2 end,
     ["Custom"] = function(t)
         if not ActionRecorder.CustomEasingPoints then return t end
         local points = ActionRecorder.CustomEasingPoints

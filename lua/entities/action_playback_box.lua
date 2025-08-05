@@ -1,3 +1,4 @@
+---@diagnostic disable: undefined-global
 AddCSLuaFile()
 
 ENT.Type = "anim"
@@ -7,34 +8,34 @@ ENT.Category = "Utility"
 ENT.Spawnable = false
 ENT.SoundPath = "buttons/button1.wav"
 
+-- Global playback timer
+local GLOBAL_PLAYBACK_TIMER = "ActionRecorder_GlobalPlayback"
+local GLOBAL_TIMER_INTERVAL = AR_FRAME_INTERVAL
+local ActivePlaybackBoxes = {}
+
 function ENT:Initialize()
-    AR_Log("ENT:Initialize called for action_playback_box")
     self:SetSolid(SOLID_VPHYSICS)
     if SERVER then
         self:SetUseType(SIMPLE_USE)
     end
     self.PlaybackData = {}
-    self.PlaybackTimers = {}
     self.PlaybackSpeed = 1
-    self.LoopMode = 0
-    self.PlaybackDirection = 1
-    self.PlaybackType = "absolute"
+    self.LoopMode = AR_LOOP_MODE.NO_LOOP
+    self.PlaybackDirection = AR_PLAYBACK_DIRECTION.FORWARD
+    self.PlaybackType = AR_PLAYBACK_TYPE.ABSOLUTE
     self.Easing = "Linear"
     self.EasingAmplitude = 1
     self.EasingFrequency = 1
     self.EasingInvert = false
     self.EasingOffset = 0
-    self.PlaybackCounter = 0
-    self.IsPlayingBack = false
-    self.LastIsPlayingBack = false
+    self.status = AR_ANIMATION_STATUS.NOT_STARTED
+    self.lastStatus = AR_ANIMATION_STATUS.NOT_STARTED
     self.BoxID = "Box"
     self.NumpadKey = self.NumpadKey or 5
     self.IsOneTimeSmoothReturn = false
-    
     self.IsActivated = false
-    self.InitialPositions = {}
-    self.InitialAngles = {}
     self.ShouldSmoothReturn = false
+    self.PhysicslessTeleport = false
 
     if SERVER and not self:GetNWString("OwnerName", nil) then
         self:SetNWString("OwnerName", "Unknown")
@@ -42,16 +43,14 @@ function ENT:Initialize()
 
     if SERVER then
         self:SetupNumpad()
-        if WireLib then
-            self.Inputs = WireLib.CreateInputs(self, { "Play", "Stop", "PlaybackSpeed", "LoopMode" })
-            self.Outputs = WireLib.CreateOutputs(self, { "IsPlaying", "PlaybackSpeed", "Frame" })
-        end
+        ActionRecorder.Wire.SetupEntity(self)
     end
+    --ARLog("Done initializing" )
 end
 
 function ENT:SetupNumpad()
-    AR_Log("ENT:SetupNumpad called for action_playback_box")
-    if not self.NumpadKey then return end
+    if not IsValid(self:GetOwner()) or not self.NumpadKey then return end
+
     if self.NumpadBind then
         numpad.Remove(self.NumpadBind)
         self.NumpadBind = nil
@@ -60,18 +59,13 @@ function ENT:SetupNumpad()
         numpad.Remove(self.NumpadUpBind)
         self.NumpadUpBind = nil
     end
+
     self.NumpadBind = numpad.OnDown(self:GetOwner(), self.NumpadKey, "ActionRecorder_Playback", self)
     self.NumpadUpBind = numpad.OnUp(self:GetOwner(), self.NumpadKey, "ActionRecorder_Playback_Release", self)
 end
 
 function ENT:OnRemove()
-    AR_Log("ENT:OnRemove called for action_playback_box")
-    if self.PlaybackTimers then
-        for _, timerName in pairs(self.PlaybackTimers) do
-            if timerName then timer.Remove(timerName) end
-        end
-        self.PlaybackTimers = nil
-    end
+    self:StopPlayback(true)
     if self.NumpadBind then
         numpad.Remove(self.NumpadBind)
         self.NumpadBind = nil
@@ -83,7 +77,6 @@ function ENT:OnRemove()
 end
 
 function ENT:SetModelPath(model)
-    AR_Log("ENT:SetModelPath called for action_playback_box with model: ", model)
     if not model or model == "" or not util.IsValidModel(model) then
         model = "models/props_c17/oildrum001.mdl"
     end
@@ -93,15 +86,33 @@ function ENT:SetModelPath(model)
 end
 
 function ENT:SetPlaybackData(data)
-    AR_Log("ENT:SetPlaybackData called for action_playback_box")
-    self.PlaybackData = data or {}
+     if not data or type(data) ~= "table" or next(data) == nil then
+        ARLog("SetPlaybackData Attempt to set Empty data ", data)
+        return
+     end
+    --ARLog("SetPlaybackData length ", #data)
+    self.PlaybackData = {}
+    self.AnimationInfo = {}
+    for id,frames in pairs(data) do
+        if not frames or 0 == #frames then
+            ARLog("attempt to setplayback entity with zero frames skipping")
+            continue end--just ignore zero frames recordings
+        self.PlaybackData[id] = frames
+        self.AnimationInfo[id] = {
+            frameCount = #frames,
+            direction = AR_PLAYBACK_DIRECTION.FORWARD,
+            status = AR_ANIMATION_STATUS.NOT_STARTED,
+            currentFrameIndex = 1,
+            initialPos = nil,
+            initialAng = nil
+        }
+   end
+   self.status = AR_ANIMATION_STATUS.NOT_STARTED
 end
-
 function ENT:SetPlaybackSettings(speed, loopMode, playbackType, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset)
-    AR_Log("ENT:SetPlaybackSettings called for action_playback_box")
     self.PlaybackSpeed = speed or 1
-    self.LoopMode = loopMode or 0
-    self.PlaybackType = playbackType or "absolute"
+    self.LoopMode = loopMode or AR_LOOP_MODE.NO_LOOP
+    self.PlaybackType = playbackType or AR_PLAYBACK_TYPE.ABSOLUTE
     self.Easing = easing or "Linear"
     self.EasingAmplitude = easing_amplitude or 1
     self.EasingFrequency = easing_frequency or 1
@@ -110,49 +121,52 @@ function ENT:SetPlaybackSettings(speed, loopMode, playbackType, easing, easing_a
 end
 
 function ENT:SetBoxID(id)
-    AR_Log("ENT:SetBoxID called for action_playback_box with id: ", id)
     self.BoxID = id or "Box"
     if SERVER then self:SetNWString("BoxID", self.BoxID) end
 end
 
 function ENT:SetOwnerName(name)
-    AR_Log("ENT:SetOwnerName called for action_playback_box with name: ", name)
     if SERVER then self:SetNWString("OwnerName", name or "Unknown") end
 end
 
 function ENT:SetSoundPath(soundpath)
-    AR_Log("ENT:SetSoundPath called for action_playback_box with soundpath: ", soundpath)
     self.SoundPath = soundpath
+end
+
+function ENT:SetPhysicslessTeleport(state)
+    self.PhysicslessTeleport = tobool(state)
+    if SERVER then
+        self:SetNWBool("PhysicslessTeleport", self.PhysicslessTeleport)
+    end
 end
 
 function ENT:UpdateSettings(
     speed, loopMode, playbackType, model, boxid, soundpath,
-    easing, easing_amplitude, easing_frequency, easing_invert, easing_offset
+    easing, easing_amplitude, easing_frequency, easing_invert, easing_offset, physicsless, freezeonend
 )
-    AR_Log("ENT:UpdateSettings called for action_playback_box with BoxID: ", boxid)
     self:StopPlayback()
     self:SetPlaybackSettings(
         speed, loopMode, playbackType,
-        easing, easing_amplitude, easing_frequency, easing_invert, easing_offset
+        easing, easing_amplitude, easing_frequency, easing_invert, easing_offset, physicsless
     )
     self:SetModelPath(model)
     self:SetBoxID(boxid)
     self:SetSoundPath(soundpath)
+    self:SetPhysicslessTeleport(physicsless)
+    self:SetNWBool("FreezeOnEnd", freezeonend)
+    self:SetupNumpad()
     self:StartPlayback()
 end
 
-
 function ENT:Use(activator, caller)
-    AR_Log("ENT:Use called for action_playback_box by: ", activator:Nick())
     if not self.PlaybackData then return end
     self:EmitSound(self.SoundPath or "buttons/button3.wav")
     self:StartPlayback(false)
 end
 
 local function IsPropControlledByOtherBox(prop, myBox)
-    AR_Log("IsPropControlledByOtherBox called for prop: ", prop:EntIndex(), " and box: ", myBox:GetNWString("BoxID", ""))
     for _, box in pairs(ents.FindByClass("action_playback_box")) do
-        if IsValid(box) and box ~= myBox and box.IsPlayingBack and istable(box.PlaybackData) and box.BoxID ~= myBox.BoxID then
+        if IsValid(box) and box ~= myBox and box.status == AR_ANIMATION_STATUS.PLAYING and istable(box.PlaybackData) and box.BoxID ~= myBox.BoxID then
             for k, _ in pairs(box.PlaybackData) do
                 if k == prop:EntIndex() then
                     return true
@@ -164,17 +178,21 @@ local function IsPropControlledByOtherBox(prop, myBox)
 end
 
 function ENT:StopPlayback(forceReturn)
-    AR_Log("ENT:StopPlayback called for action_playback_box with forceReturn: ", forceReturn)
-    if not self.IsPlayingBack and not forceReturn then return end
-    if not self.PlaybackTimers then return end
-    for _, oldTimerName in pairs(self.PlaybackTimers) do
-        if oldTimerName then timer.Remove(oldTimerName) end
-    end
-    self.PlaybackTimers = {}
-    self.IsPlayingBack = false
-    self.IsActivated = false
+    if self.status  ~= AR_ANIMATION_STATUS.PLAYING and not forceReturn then return end
 
-    if self.LoopMode == 0 or self.LoopMode == 3 then
+    self.status = AR_ANIMATION_STATUS.FINISHED
+    self.IsActivated = false
+    -- Remove this box from the active playback boxes
+    ActivePlaybackBoxes[self] = nil
+
+    -- If no boxes are playing, remove the global timer
+    if table.IsEmpty(ActivePlaybackBoxes) then
+        timer.Remove(GLOBAL_PLAYBACK_TIMER)
+    end
+
+    local freezeOnEnd = self:GetNWBool("FreezeOnEnd", false)
+
+    if freezeOnEnd and (self.LoopMode == AR_LOOP_MODE.NO_LOOP or self.LoopMode == AR_LOOP_MODE.NO_LOOP_SMOOTH) then
         for entIndex, _ in pairs(self.PlaybackData or {}) do
             local ent = Entity(entIndex)
             if IsValid(ent) then
@@ -185,238 +203,450 @@ function ENT:StopPlayback(forceReturn)
             end
         end
     end
+end
 
-    if self.LoopMode == 3 then -- No Loop (Smooth)
-        self.PlaybackDirection = -1 -- Set direction to reverse for smooth return
-        self.IsOneTimeSmoothReturn = true
-        self:StartPlayback(true)
-    end
+function ENT:Cleanup()
+
 end
 
 
 function ENT:StartPlayback()
-    AR_Log("ENT:StartPlayback called for action_playback_box")
-    if self.IsPlayingBack then return end
-
+    ARLog("StartPlayback called")
+    ARLog("PlaybackData contains: " .. table.Count(self.PlaybackData or {}) .. " entities")
     -- Capture initial positions/angles when playback starts
-    if not self.IsPlayingBack then -- Only capture if not already playing
-        self.InitialPositions = {}
-        self.InitialAngles = {}
+    if self.status ~= AR_ANIMATION_STATUS.PLAYING then -- Only capture if not already playing
         for entIndex, frames in pairs(self.PlaybackData or {}) do
             local ent = Entity(entIndex)
             if IsValid(ent) then
-                self.InitialPositions[entIndex] = ent:GetPos()
-                self.InitialAngles[entIndex] = ent:GetAngles()
+                local info = self.AnimationInfo[entIndex]
+                if info then
+                    info.initialPos = ent:GetPos()
+                    ARLog("Entity " .. entIndex .. " initial pos: ", info.initialPos)
+                    info.initialAng = ent:GetAngles()
+                    ARLog("Entity " .. entIndex .. " frame count: ", info.frameCount)
+                end
             end
         end
     end
-
-    if not self.PlaybackTimers then self.PlaybackTimers = {} end
-    for _, oldTimerName in pairs(self.PlaybackTimers) do
-        if oldTimerName then timer.Remove(oldTimerName) end
-    end
-    self.PlaybackTimers = {}
-    self.PlaybackCounter = (self.PlaybackCounter or 0) + 1
-    self.IsPlayingBack = true
-    self.PlaybackDirection = 1
-    
+    self.LastFrameTime = CurTime()
+    self.status = AR_ANIMATION_STATUS.PLAYING
+    self.PlaybackDirection = AR_PLAYBACK_DIRECTION.FORWARD
     self.IsActivated = true
 
-    for entIndex, frames in pairs(self.PlaybackData or {}) do
-        local ent = Entity(entIndex)
-        if not IsValid(ent) then continue end
-        if IsPropControlledByOtherBox(ent, self) then continue end
-        local phys = ent:GetPhysicsObject()
-        if not IsValid(phys) then continue end
+    -- Add this box to the active playback boxes
+    ActivePlaybackBoxes[self] = true
 
-        local frameCount = #frames
-        if frameCount == 0 then continue end
-
-        phys:EnableMotion(true)
-        ent:SetCollisionGroup(COLLISION_GROUP_NONE)
-
-        local i = (self.PlaybackSpeed < 0) and frameCount or 1
-        self.i = i
-        local timerName = "Playback_" .. self:EntIndex() .. "_" .. entIndex .. "_" .. self.PlaybackCounter
-        self.PlaybackTimers[entIndex] = timerName
-
-        local basePos = (self.PlaybackType == "relative") and (ent:GetPos() - frames[i].pos) or Vector(0,0,0)
-
-        if ent.IsBeingPlayedBack and ent.PlaybackBox and ent.PlaybackBox ~= self then
-            ent.IsBeingPlayedBack = false
-            ent.PlaybackBox = nil
-        end
-
-        ent.TargetPos = frames[i].pos + basePos
-        ent.TargetAng = frames[i].ang
-        ent.LastFrameTime = CurTime()
-        ent.NextFrameTime = CurTime() + math.abs(0.02 / (self.PlaybackSpeed or 1))
-        ent.IsBeingPlayedBack = true
-        ent.PlaybackBox = self
-
-        if false then
-            self.InitialPositions[entIndex] = ent:GetPos()
-            self.InitialAngles[entIndex] = ent:GetAngles()
-        end
-
-        timer.Create(timerName, math.abs(0.02 / (self.PlaybackSpeed or 1)), 0, function()
-            if not IsValid(self) or not self.PlaybackSpeed or not self.PlaybackTimers then
-                timer.Remove(timerName)
-                if ent then
-                    ent.IsBeingPlayedBack = false
-                    ent.PlaybackBox = nil
-                    if self and (self.LoopMode == 0 or self.LoopMode == 3) then
-                        local phys = ent:GetPhysicsObject()
-                        if IsValid(phys) then
-                            phys:EnableMotion(false)
-                        end
-                    end
-                end
-                return
-            end
-
-            if not IsValid(ent) or not IsValid(phys) then
-                timer.Remove(timerName)
-                if self.PlaybackTimers then self.PlaybackTimers[entIndex] = nil end
-                if ent then
-                    ent.IsBeingPlayedBack = false
-                    ent.PlaybackBox = nil
-                    if self and (self.LoopMode == 0 or self.LoopMode == 3) then
-                        local phys = ent:GetPhysicsObject()
-                        if IsValid(phys) then
-                            phys:EnableMotion(false)
-                        end
-                    end
-                end
-                return
-            end
-
-            local frame = frames[i]
-            if not frame then
-                if self.LoopMode == 1 then -- Loop
-                    i = (self.PlaybackSpeed < 0) and frameCount or 1
-                    frame = frames[i]
-                    basePos = (self.PlaybackType == "relative") and (ent:GetPos() - frame.pos) or Vector(0,0,0)
-                elseif self.LoopMode == 2 then -- Ping-Pong
-                    self.PlaybackDirection = self.PlaybackDirection * -1
-                    i = i + (self.PlaybackDirection * (self.PlaybackSpeed < 0 and -1 or 1) * 2)
-                    frame = frames[i]
-                    basePos = (self.PlaybackType == "relative") and (ent:GetPos() - frame.pos) or Vector(0,0,0)
-                elseif self.LoopMode == 3 then -- No Loop (Smooth)
-                    if self.PlaybackDirection == 1 then -- Finished forward playback, start reverse
-                        self.PlaybackDirection = -1
-                        i = frameCount -- Start from the end for reverse
-                        frame = frames[i]
-                        basePos = (self.PlaybackType == "relative") and (ent:GetPos() - frame.pos) or Vector(0,0,0)
-                    else -- Finished reverse playback
-                        AR_Log("Playback: LoopMode 3 (Smooth) - Finished reverse playback for ent ", tostring(entIndex), ". Removing timer.")
-                        timer.Remove(timerName)
-                        if self.PlaybackTimers then self.PlaybackTimers[entIndex] = nil end
-                        ent.IsBeingPlayedBack = false
-                        ent.PlaybackBox = nil
-                        if self.LoopMode == 0 or self.LoopMode == 3 then
-                            local phys = ent:GetPhysicsObject()
-                            if IsValid(phys) then
-                                phys:EnableMotion(false)
-                            end
-                        end
-                        local allDone = true
-                        if self.PlaybackTimers then
-                            AR_Log("Playback: LoopMode 3 (Smooth) - Checking remaining timers. Count: ", tostring(table.Count(self.PlaybackTimers or {})))
-                            for _, v in pairs(self.PlaybackTimers) do
-                                if v then allDone = false; break end
-                            end
-                        end
-                        AR_Log("Playback: LoopMode 3 (Smooth) - All timers done: ", tostring(allDone))
-                        if allDone then
-                            self.IsPlayingBack = false
-                            self.PlaybackDirection = 1 -- Reset direction for next playback
-                            self.IsOneTimeSmoothReturn = false -- Reset flag
-                            AR_Log("Playback: LoopMode 3 (Smooth) - Playback finished. IsPlayingBack set to false.")
-                        end
-                        return
-                    end
-                else -- No Loop (original)
-                    AR_Log("Playback: LoopMode 0 (Original) - Finished playback for ent ", tostring(entIndex), ". Removing timer.")
-                    timer.Remove(timerName)
-                    if self.PlaybackTimers then self.PlaybackTimers[entIndex] = nil end
-                    ent.IsBeingPlayedBack = false
-                    ent.PlaybackBox = nil
-                    if self.LoopMode == 0 or self.LoopMode == 3 then
-                        local phys = ent:GetPhysicsObject()
-                        if IsValid(phys) then
-                            phys:EnableMotion(false)
-                        end
-                    end
-                    local allDone = true
-                    if self.PlaybackTimers then
-                        AR_Log("Playback: LoopMode 0 (Original) - Checking remaining timers. Count: ", tostring(table.Count(self.PlaybackTimers or {})))
-                        for _, v in pairs(self.PlaybackTimers) do
-                            if v then allDone = false; break end
-                        end
-                    end
-                    AR_Log("Playback: LoopMode 0 (Original) - All timers done: ", tostring(allDone))
-                    if allDone then
-                        self.IsPlayingBack = false
-                        AR_Log("Playback: LoopMode 0 (Original) - Playback finished. IsPlayingBack set to false.")
-                    end
-                    return
+    for _, info in pairs(self.AnimationInfo) do
+        info.status = AR_ANIMATION_STATUS.PLAYING
+        info.currentFrameIndex = 1
+        info.LastMoveTime = CurTime()
+     end
+    -- Create the global timer if it doesn't exist
+    if not timer.Exists(GLOBAL_PLAYBACK_TIMER) then
+        --ARLog("Creating global timer")
+        timer.Create(GLOBAL_PLAYBACK_TIMER, GLOBAL_TIMER_INTERVAL, 0, function()
+            for box, _ in pairs(ActivePlaybackBoxes) do
+                if IsValid(box) then
+                    box:ProcessPlayback()
+                else
+                    ARLog("We have an invalid box")
                 end
             end
-
-            if not frame then
-                AR_Log("Playback: No frame found for ent ", tostring(entIndex), ". Removing timer.")
-                timer.Remove(timerName)
-                if self.PlaybackTimers then self.PlaybackTimers[entIndex] = nil end
-                ent.IsBeingPlayedBack = false
-                ent.PlaybackBox = nil
-                if self.LoopMode == 0 or self.LoopMode == 3 then
-                    local phys = ent:GetPhysicsObject()
-                    if IsValid(phys) then
-                        phys:EnableMotion(false)
-                    end
-                end
-                local allDone = true
-                if self.PlaybackTimers then
-                    AR_Log("Playback: No frame found - Checking remaining timers. Count: ", tostring(table.Count(self.PlaybackTimers or {})))
-                    for _, v in pairs(self.PlaybackTimers) do
-                        if v then allDone = false; break end
-                    end
-                end
-                AR_Log("Playback: No frame found - All timers done: ", tostring(allDone))
-                if allDone then self.IsPlayingBack = false end
-                return
-            end
-
-            AR_Log("Playing back frame for ent ", entIndex, ": Pos=", tostring(frame.pos), ", Ang=", tostring(frame.ang), ", CurrentFrame=", i)
-            ent.TargetPos = frame.pos + basePos
-            ent.TargetAng = frame.ang
-
-            
-            if frame.material then ent:SetMaterial(frame.material) end
-            if frame.color then ent:SetColor(frame.color) end
-            if frame.renderfx then ent:SetRenderFX(frame.renderfx) end
-            if frame.rendermode then ent:SetRenderMode(frame.rendermode) end
-            if frame.skin then ent:SetSkin(frame.skin) end
-            if frame.bodygroups then
-                for id, val in pairs(frame.bodygroups) do
-                    ent:SetBodygroup(id, val)
-                end
-            end
-
-            ent.LastFrameTime = CurTime()
-            ent.NextFrameTime = CurTime() + math.abs(0.02 / (self.PlaybackSpeed or 1))
-
-            i = i + (self.PlaybackDirection * (self.PlaybackSpeed < 0 and -1 or 1))
-            self.i = i
         end)
     end
+
+    -- Initialize playback for all entities
+    ARLog("Initializing playback for " .. table.Count(self.PlaybackData or {}) .. " entities")
+    for entIndex, _ in pairs(self.PlaybackData or {}) do
+        ARLog("Setting up entity " .. entIndex)
+        self:SetupEntityPlayback(entIndex)
+    end
+    ARLog("Finished StartPlayback")
+end
+
+--- This function assumes all entities have same number of frames
+--TODO this could be optimized by storing the frames count in the box object when recording is done
+function ENT:getFramesCount()
+    -- Legacy function - use GetMaxFrames() instead
+    return self:GetMaxFrames()
+end
+
+function ENT:GetCurrentFrameIndex()
+    -- Return the minimum frame across all animated entities
+    local minFrame = math.huge
+    for _, info in pairs(self.AnimationInfo or {}) do
+        if info and info.currentFrameIndex then
+            minFrame = math.min(minFrame, info.currentFrameIndex)
+            --ARLog("min frame is ", minFrame)f
+        end
+    end
+    return minFrame == math.huge and 1 or minFrame
+end
+
+function ENT:GetMaxFrames()
+    -- Return the maximum frame count across all entities
+    local maxFrames = 0
+    for _, info in pairs(self.AnimationInfo or {}) do
+        if info and info.frameCount then
+            maxFrames = math.max(maxFrames, info.frameCount)
+        end
+    end
+    return maxFrames
+end
+function ENT:StopPlaybackIfNeeded()
+    local allEntitiesFinished = true
+    
+    for _, info in pairs(self.AnimationInfo or {}) do
+        if info.status ~= AR_ANIMATION_STATUS.FINISHED then
+            allEntitiesFinished = false
+            break
+        end
+    end
+    if allEntitiesFinished then
+        self:StopPlayback()
+    end
+end
+function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
+    --ARLog("advanceFrames called: amount=" .. amount .. ", frameCount=" .. frameCount .. ", currentIndex=" .. currentFrameIndex)
+
+    if frameCount <= 1 then
+        ARLog("Only one frame available, marking entity as finished.")
+        return -1  -- Mark as finished to stop processing
+    end
+    local atStart = currentFrameIndex == 1
+    local atEnd = currentFrameIndex == frameCount
+    local nextFrameIndex = currentFrameIndex
+    local direction = self:calculateDirection()
+
+    -- Log basic information
+    -- ARLog("direction:", direction, "atStart:", atStart, "atEnd:", atEnd, "frameCount:", frameCount)
+
+    if direction > 0 then
+         -- ARLog("Positive direction detected")
+        if not atEnd then
+            --ARLog("Not at end, incrementing index")
+            nextFrameIndex = math.min(nextFrameIndex + amount, frameCount)
+        else
+            --ARLog("At end, handling loop modes")
+            if self.LoopMode == AR_LOOP_MODE.NO_LOOP then
+                ARLog("No loop mode, entity finished")
+                return -1
+            elseif self.LoopMode == AR_LOOP_MODE.PING_PONG then
+                --ARLog("Ping pong mode, reversing direction")
+                self.PlaybackDirection = self.PlaybackDirection * (-1)
+                nextFrameIndex = frameCount
+            elseif self.LoopMode == AR_LOOP_MODE.LOOP then
+                ARLog("Loop mode, resetting to start")
+                nextFrameIndex = 1
+            else
+                ARLog("Unsupported Loop mode in advanceFrames")
+            end
+        end
+    else -- direction < 0 case
+         -- ARLog("Negative direction detected")
+        if not atStart then
+            --ARLog("Not at start, decrementing index")
+            nextFrameIndex = math.max(1, nextFrameIndex - amount)
+        else
+            --ARLog("At start, handling loop modes")
+            if self.LoopMode == AR_LOOP_MODE.NO_LOOP then
+                ARLog("No loop mode, entity finished")
+                return -1
+            elseif self.LoopMode == AR_LOOP_MODE.PING_PONG then
+                --ARLog("Ping pong mode, reversing direction")
+                self.PlaybackDirection = self.PlaybackDirection * (-1)
+                nextFrameIndex = 1
+            elseif self.LoopMode == AR_LOOP_MODE.LOOP then
+                --ARLog("Loop mode, resetting to end")
+                nextFrameIndex = frameCount
+            else
+                ARLog("Unsupported Loop mode in advanceFrames")
+            end
+        end
+    end
+
+    --ARLog("advanceFrames calculated nextFrameIndex:", nextFrameIndex)
+    return nextFrameIndex
+end
+
+function ENT:GetSpeed(currentFrameIndex, frameCount)
+    ARLog("GetSpeed called - Easing: " .. tostring(self.Easing) .. ", Frame: " .. currentFrameIndex .. "/" .. frameCount)
+    -- Calculate progress for THIS specific entity (0 to 1)
+    local progress = currentFrameIndex / frameCount
+    local minSpeed = 0.1
+    local speed = minSpeed
+    if not self.Easing then
+        --ARLog("Using no easing, returning base speed: " .. self.PlaybackSpeed)
+        return self.PlaybackSpeed
+    end
+    local easing_func = ActionRecorder.EasingFunctions[self.Easing]
+    if not easing_func then
+        ARLog("Easing function not found ", self.Easing)
+        speed = self.PlaybackSpeed
+    else
+        local y = easing_func(progress)
+        speed = self.PlaybackSpeed * y
+        ARLog("Easing function value for , is and speed ", progress, y, speed)
+    end
+   if speed < minSpeed then
+        speed = minSpeed
+   end
+        
+   --ARLog("Easing calculation - Current: " .. speed)
+   return speed
 end
 
 
+function ENT:calculateNextFrame(currentFrameIndex, framesCount, lastMoveTime)
+    local speed = self:GetSpeed(currentFrameIndex, framesCount)
+    --ARLog("calculateNextFrame: speed=" .. speed .. ", currentFrame=" .. currentFrameIndex .. ", totalFrames=" .. framesCount)
+    if (speed == 0) then
+        ARLog("Speed is zero for ") -- TODO add the box id in the message
+        return 1 -- move object at first frame if he set speed to 0
+    end
+    local moveTimeInterval = GLOBAL_TIMER_INTERVAL / math.abs(speed) --dividing with a num less then 1 will increase the numerator
+
+    local now = CurTime()
+    local timeSinceLastMove = now - lastMoveTime
+    -- if speed is small we might not need to move to next frame
+    if (math.abs(speed) < 1) then
+        ARLog("speed < 1: " .. speed .. ", timeSinceLastMove: " .. timeSinceLastMove .. ", moveTimeInterval: " .. moveTimeInterval)
+        if timeSinceLastMove < moveTimeInterval then
+            -- Return decimal frame index for smooth interpolation
+            local progress = timeSinceLastMove / moveTimeInterval
+            local decimalFrameIndex = currentFrameIndex + progress
+            ARLog("returning decimal frame index " .. decimalFrameIndex)
+            return decimalFrameIndex
+        else -- we need to advance 1 frame
+           --ARLog("advancing 1 frame from " .. currentFrameIndex)
+           return self:advanceFrames(1, framesCount, currentFrameIndex)
+        end
+    else --case speed is greate then 1 in abs value
+        local framesToMove = math.floor(timeSinceLastMove / moveTimeInterval)
+        return self:advanceFrames(framesToMove, framesCount, currentFrameIndex)
+    end
+end
+
+function ENT:SetupEntityPlayback(entIndex)
+    ARLog("SetupEntityPlayback for entity " .. entIndex)
+    local ent = Entity(entIndex)
+    if not IsValid(ent) then return end
+    --if IsPropControlledByOtherBox(ent, self) then return end -- This is only for replaying one box at a time.
+    local phys = ent:GetPhysicsObject()
+    if not IsValid(phys) then return end
+    local frames = self.PlaybackData[entIndex]
+    local info = self.AnimationInfo[entIndex]
+    local frameCount = info.frameCount
+    if frameCount == 0 then return end
+
+    phys:EnableMotion(true)
+
+    ent:SetCollisionGroup(COLLISION_GROUP_NONE)
+
+    local i = info.currentFrameIndex
+
+    local basePos = Vector(0,0,0)
+    if self.PlaybackType == AR_PLAYBACK_TYPE.RELATIVE and frames[1] and frames[1].pos then
+        if info.initialPos then
+            basePos = info.initialPos - frames[1].pos
+        end
+    end
+
+    if ent.IsBeingPlayedBack and ent.PlaybackBox and ent.PlaybackBox ~= self then
+        ent.IsBeingPlayedBack = false
+        ent.PlaybackBox = nil
+    end
+
+    if frames[i].pos and frames[i].ang then
+        ent.TargetPos = frames[i].pos + basePos
+        ent.TargetAng = frames[i].ang
+        ARLog("Entity " .. entIndex .. " target pos set to: " .. tostring(ent.TargetPos))
+        
+        -- Immediately apply the first frame position
+        self:ApplyFrameData(ent, frames[i], basePos)
+    else
+        ent.TargetPos = ent:GetPos()
+        ent.TargetAng = ent:GetAngles()
+        ARLog("Entity " .. entIndex .. " no frame data, using current pos: " .. tostring(ent.TargetPos))
+    end
+    ent.IsBeingPlayedBack = true
+    ent.PlaybackBox = self
+end
+
+function ENT:calculateDirection()
+    return (self.PlaybackDirection * (self.PlaybackSpeed < 0 and -1 or 1))
+end
+
+function interpolateFrame(frames, decimalIndex, direction)
+    if math.floor(decimalIndex) == decimalIndex then
+        return frames[decimalIndex]
+    end
+    
+    local frameIndex = math.floor(math.abs(decimalIndex))
+    local alpha = decimalIndex - frameIndex
+    
+    -- Get current and next frame indices based on direction
+    local currentFrameIndex = frameIndex
+    local nextFrameIndex
+    
+    if direction > 0 then
+        nextFrameIndex = math.min(frameIndex + 1, #frames)
+    else
+        nextFrameIndex = math.max(frameIndex - 1, 1)
+    end
+    
+    local currentFrame = frames[currentFrameIndex]
+    local nextFrame = frames[nextFrameIndex]
+    
+    if not currentFrame or not nextFrame then
+        return currentFrame or nextFrame
+    end
+    
+    -- Clone current frame
+    local interpolatedFrame = table.Copy(currentFrame)
+    
+    -- Interpolate position
+    if currentFrame.pos and nextFrame.pos then
+        interpolatedFrame.pos = LerpVector(alpha, currentFrame.pos, nextFrame.pos)
+    end
+    
+    -- Interpolate angles
+    if currentFrame.ang and nextFrame.ang then
+        interpolatedFrame.ang = LerpAngle(alpha, currentFrame.ang, nextFrame.ang)
+    end
+    
+    -- Interpolate color if present
+    if currentFrame.color and nextFrame.color then
+        interpolatedFrame.color = Color(
+            Lerp(alpha, currentFrame.color.r, nextFrame.color.r),
+            Lerp(alpha, currentFrame.color.g, nextFrame.color.g),
+            Lerp(alpha, currentFrame.color.b, nextFrame.color.b),
+            Lerp(alpha, currentFrame.color.a, nextFrame.color.a)
+        )
+    end
+    
+    return interpolatedFrame
+end
+function ENT:ProcessPlayback()
+    if self.status ~= AR_ANIMATION_STATUS.PLAYING then
+        ARLog("Wrong status in process playback: ", self.status)
+    return end
+
+    local freezeOnEnd = self:GetNWBool("FreezeOnEnd", false)
+    local now = CurTime()
+
+    --ARLog("ProcessPlayback: Processing ", table.Count(self.PlaybackData or {}), " entities")
+
+    for entIndex, frames in pairs(self.PlaybackData or {}) do
+         local ent = Entity(entIndex)
+         if not IsValid(ent) then continue end
+         local phys = ent:GetPhysicsObject()
+         if not IsValid(phys) then continue end
+
+
+         local info = self.AnimationInfo[entIndex]
+         
+         -- Skip entities that are already finished
+         if info.status == AR_ANIMATION_STATUS.FINISHED then
+             --ARLog("Skipping finished entity: ", entIndex)
+             continue
+         end
+         
+         local frameCount = info.frameCount
+         --ARLog("Entity ", entIndex, " frameCount: ", frameCount, " currentFrame: ", info.currentFrameIndex)
+         if frameCount == 0 then
+            ARLog("This entity has zero frames, should not have been added ", entIndex)
+            continue
+         end
+         local frameIndex = self:calculateNextFrame(info.currentFrameIndex, frameCount, info.LastMoveTime)
+         --ARLog("Entity " .. entIndex .. " calculated frameIndex: " .. frameIndex .. " (was " .. info.currentFrameIndex .. ")")
+         if (frameIndex == info.currentFrameIndex) then
+            continue
+         end
+         
+         -- Check if entity finished
+         if frameIndex == -1 then
+             info.status = AR_ANIMATION_STATUS.FINISHED
+             --ARLog("Entity " .. entIndex .. " marked as finished")
+             -- Check if all entities are finished and stop playback if needed
+             self:StopPlaybackIfNeeded()
+             continue
+         end
+
+        -- Calculate the base position and handle decimal frame indices
+        local frame
+        if math.floor(frameIndex) == frameIndex then
+            -- Whole number frame index
+            frame = frames[frameIndex]
+        else
+            -- Decimal frame index - use interpolation
+            local direction = self:calculateDirection()
+            frame = interpolateFrame(frames, frameIndex, direction)
+        end
+        
+        if frame then
+            local basePos = Vector(0,0,0)
+            if self.PlaybackType == AR_PLAYBACK_TYPE.RELATIVE and frame.pos then
+                if info.initialPos and frames[1] and frames[1].pos then
+                    basePos = info.initialPos - frames[1].pos
+                end
+            end
+
+            self:ApplyFrameData(ent, frame, basePos)
+            info.LastMoveTime = now
+        end
+        info.currentFrameIndex = frameIndex
+    end --end for
+
+    self.LastFrameTime = now
+end
+
+function ENT:ApplyFrameData(ent, frame, basePos)
+    -- Apply position and angle changes
+    if frame.pos and frame.ang then
+        local targetPos = frame.pos + basePos
+        local targetAng = frame.ang
+
+        -- Move the entity directly
+        local phys = ent:GetPhysicsObject()
+        if IsValid(phys) then
+            local params = {
+                pos = targetPos,
+                angle = targetAng,
+                maxspeed = 10000,
+                maxangular = 10000,
+                maxspeeddamp = 10000,
+                maxangulardamp = 10000,
+                dampfactor = 1,
+                teleportdistance = self.PhysicslessTeleport and 0.1 or 0,
+                deltaTime = GLOBAL_TIMER_INTERVAL
+            }
+            phys:Wake()
+            phys:ComputeShadowControl(params)
+        else
+            -- Fallback for entities without physics
+            ent:SetPos(targetPos)
+            ent:SetAngles(targetAng)
+        end
+    else
+        ARLog("ApplyFrameData NO pos OR angle", frame.pos, frame.ang)
+    end
+
+    -- Apply visual changes
+    if frame.material then ent:SetMaterial(frame.material) end
+    if frame.color then ent:SetColor(frame.color) end
+    if frame.renderfx then ent:SetRenderFX(frame.renderfx) end
+    if frame.rendermode then ent:SetRenderMode(frame.rendermode) end
+    if frame.skin then ent:SetSkin(frame.skin) end
+    if frame.bodygroups then
+        for id, val in pairs(frame.bodygroups) do
+            ent:SetBodygroup(id, val)
+        end
+    end
+end
+
 if CLIENT then
     function ENT:Draw()
-        AR_Log("ENT:Draw called for action_playback_box")
         self:DrawModel()
         local id = self:GetNWString("BoxID", self.BoxID or "")
         local ownerName = self:GetNWString("OwnerName", "Unknown")
@@ -432,118 +662,6 @@ if CLIENT then
     end
 end
 
-hook.Add("Think", "ActionRecorder_PlaybackThink", function()
-    for _, ent in pairs(ents.GetAll()) do
-        if IsValid(ent) and ent.IsBeingPlayedBack and IsValid(ent.PlaybackBox) then
-            local phys = ent:GetPhysicsObject()
-            if IsValid(phys) then
-                local alpha = (CurTime() - ent.LastFrameTime) / (ent.NextFrameTime - ent.LastFrameTime)
-                alpha = math.Clamp(alpha, 0, 1)
-                local original_alpha = alpha
-
-                local easing_func = ActionRecorder.EasingFunctions[ent.PlaybackBox.Easing or "Linear"]
-                if easing_func then
-                    local t = alpha
-                    t = t + ent.PlaybackBox.EasingOffset
-                    t = t * ent.PlaybackBox.EasingFrequency
-
-                    local eased_alpha = easing_func(t)
-
-                    if eased_alpha ~= eased_alpha or math.abs(eased_alpha) == math.huge then
-                        eased_alpha = original_alpha
-                    end
-
-                    if ent.PlaybackBox.EasingInvert then
-                        eased_alpha = 1 - eased_alpha
-                    end
-
-                    alpha = Lerp(ent.PlaybackBox.EasingAmplitude, original_alpha, eased_alpha)
-
-                    if alpha ~= alpha or math.abs(alpha) == math.huge then
-                        alpha = eased_alpha
-                    end
-                end
-
-                local interpolatedPos = LerpVector(alpha, ent:GetPos(), ent.TargetPos)
-                local interpolatedAng = LerpAngle(alpha, ent:GetAngles(), ent.TargetAng)
-
-                local params = {
-                    pos = interpolatedPos,
-                    angle = interpolatedAng,
-                    maxspeed = 10000,
-                    maxangular = 10000,
-                    maxspeeddamp = 10000,
-                    maxangulardamp = 10000,
-                    dampfactor = 1,
-                    teleportdistance = GetConVar("ar_physicsless_teleport"):GetBool() and 0.1 or 0,
-                    deltaTime = FrameTime()
-                }
-                phys:Wake()
-                phys:ComputeShadowControl(params)
-            end
-        end
-
-        -- Smooth return for No Loop (Smooth) when playback is finished
-        if IsValid(ent) and ent.PlaybackBox and ent.PlaybackBox.IsOneTimeSmoothReturn and not ent.PlaybackBox.IsPlayingBack then
-            local playbackBox = ent.PlaybackBox
-            local initialPos = playbackBox.InitialPositions[ent:EntIndex()]
-            local initialAng = playbackBox.InitialAngles[ent:EntIndex()]
-
-            if initialPos and initialAng then
-                local phys = ent:GetPhysicsObject()
-                if IsValid(phys) then
-                    local alpha = (CurTime() - ent.LastFrameTime) / (ent.NextFrameTime - ent.LastFrameTime)
-                    alpha = math.Clamp(alpha, 0, 1)
-                    local original_alpha = alpha
-
-                    local easing_func = ActionRecorder.EasingFunctions[playbackBox.Easing or "Linear"]
-                    if easing_func then
-                        local t = alpha
-                        t = t + playbackBox.EasingOffset
-                        t = t * playbackBox.EasingFrequency
-
-                        local eased_alpha = easing_func(t)
-
-                        if eased_alpha ~= eased_alpha or math.abs(eased_alpha) == math.huge then
-                            eased_alpha = original_alpha
-                        end
-
-                        if playbackBox.EasingInvert then
-                            eased_alpha = 1 - eased_alpha
-                        end
-
-                        alpha = Lerp(playbackBox.EasingAmplitude, original_alpha, eased_alpha)
-
-                        if alpha ~= alpha or math.abs(alpha) == math.huge then
-                            alpha = eased_alpha
-                        end
-                    end
-
-                    local interpolatedPos = LerpVector(alpha, ent:GetPos(), initialPos)
-                    local interpolatedAng = LerpAngle(alpha, ent:GetAngles(), initialAng)
-
-                    local params = {
-                        pos = interpolatedPos,
-                        angle = interpolatedAng,
-                        maxspeed = 10000,
-                        maxangular = 10000,
-                        maxspeeddamp = 10000,
-                        maxangulardamp = 10000,
-                        dampfactor = 1,
-                        teleportdistance = 0.1, -- Small non-zero value to prevent jittering
-                        deltaTime = FrameTime()
-                    }
-                    phys:Wake()
-                    phys:ComputeShadowControl(params)
-
-                    if alpha >= 1 then
-                        playbackBox.IsOneTimeSmoothReturn = false
-                    end
-                end
-            end
-        end
-    end
-end)
 
 if SERVER then
     numpad.Register("ActionRecorder_Playback", function(ply, ent)
@@ -555,44 +673,127 @@ if SERVER then
     numpad.Register("ActionRecorder_Playback_Release", function(ply, ent)
         if not IsValid(ent) then return end
         if ent:GetNWString("OwnerName", "") ~= ply:Nick() then return end
-        
+
     end)
     if WireLib then
         duplicator.RegisterEntityClass("action_playback_box", WireLib.MakeWireEnt, "Data")
     end
 end
 
+function ENT:OnDuplicated()
+    -- Re-setup wire integration when entity is duplicated
+    if WireLib then
+        timer.Simple(0.1, function()
+            if IsValid(self) then
+                --ARLog("Re-initializing wire integration after duplication")
+                ActionRecorder.Wire.SetupEntity(self)
+            end
+        end)
+    end
+end
+
 function ENT:TriggerInput(iname, value)
-    AR_Log("ENT:TriggerInput called for action_playback_box with iname: ", tostring(iname), " and value: ", tostring(value))
-    if iname == "Play" then
-        if value ~= 0 then
-            self:StartPlayback(true)
-        else
-            
+    if not WireLib then return end
+    
+    local handlers = {
+        ["Play"] = function(val) 
+            if val ~= 0 then 
+                self:StartPlayback(true) 
+            else 
+                self:StopPlayback(true) 
+            end 
+        end,
+        
+        ["Stop"] = function(val) 
+            if val ~= 0 then self:StopPlayback(true) end 
+        end,
+        
+        ["PlaybackSpeed"] = function(val) 
+            self.PlaybackSpeed = math.Clamp(val, -10, 10) 
+        end,
+        
+        ["LoopMode"] = function(val) 
+            local validMode = ActionRecorder.Wire.ValidateLoopMode(val)
+            if validMode then
+                self.LoopMode = validMode
+            else
+                ActionRecorder.Wire.Error(self, "Invalid loop mode: " .. tostring(val))
+            end
+        end,
+        
+        ["Reset"] = function(val) 
+            if val ~= 0 then self:ResetPlayback() end 
+        end,
+        
+        ["SetFrame"] = function(val)
+            if 0 == val then
+                return
+            end
+            --ARLog("SetFrame input val is ", val)
+            self:SetCurrentFrame(math.max(1, val))
         end
-    elseif iname == "Stop" and value ~= 0 then
-        self:StopPlayback(true)
-    elseif iname == "PlaybackSpeed" then
-        self.PlaybackSpeed = value
-    elseif iname == "LoopMode" then
-        self.LoopMode = value
+    }
+    
+    local handler = handlers[iname]
+    if handler then 
+        handler(value) 
+    else
+        ActionRecorder.Wire.Error(self, "Unknown input: " .. tostring(iname))
     end
 end
 
 function ENT:Think()
-    AR_Log("ENT:Think called for action_playback_box")
-    if not WireLib then return end
-
-    if self.IsPlayingBack ~= self.LastIsPlayingBack then
-        WireLib.TriggerOutput(self, "IsPlaying", self.IsPlayingBack and 1 or 0)
-        self.LastIsPlayingBack = self.IsPlayingBack
+    if not WireLib or not self.WireState then return end
+    
+    local now = CurTime()
+    
+    -- Throttle wire outputs to 10Hz instead of 50Hz for better performance
+    if now - self.WireState.outputThrottle < 0.1 then
+        self:NextThink(now + 0.02)
+        return true
     end
-
-    if self.IsPlayingBack then
-        WireLib.TriggerOutput(self, "PlaybackSpeed", self.PlaybackSpeed)
-        WireLib.TriggerOutput(self, "Frame", self.i or 0)
-    end
-
-    self:NextThink(CurTime())
+    self.WireState.outputThrottle = now
+    
+    -- Update wire outputs using the centralized system
+    ActionRecorder.Wire.UpdateOutputs(self)
+    
+    self:NextThink(now + 0.02)
     return true
+end
+
+function ENT:ResetPlayback()
+    --ARLog("ResetPlayback called via wire input")
+    self:StopPlayback(true)
+    
+    -- Reset all animation info to frame 1
+    for _, info in pairs(self.AnimationInfo or {}) do
+        if info then
+            info.currentFrameIndex = 1
+            info.status = AR_ANIMATION_STATUS.FINISHED
+        end
+    end
+    
+    -- Update wire outputs immediately to reflect the reset
+    if self.WireState then
+        ActionRecorder.Wire.UpdateOutputs(self)
+    end
+end
+
+function ENT:SetCurrentFrame(frame)
+    --ARLog("SetCurrentFrame called with frame: " .. tostring(frame))
+    
+    -- Set all entities to the specified frame
+    for _, info in pairs(self.AnimationInfo or {}) do
+        if info and info.frameCount then
+            info.currentFrameIndex = math.Clamp(frame, 1, info.frameCount)
+        end
+    end
+    
+    -- Apply the frame data immediately by processing a single frame
+    self:ProcessPlayback()
+    
+    -- Update wire outputs immediately
+    if self.WireState then
+        ActionRecorder.Wire.UpdateOutputs(self)
+    end
 end
