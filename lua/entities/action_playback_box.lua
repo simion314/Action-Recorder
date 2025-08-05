@@ -178,9 +178,15 @@ local function IsPropControlledByOtherBox(prop, myBox)
 end
 
 function ENT:StopPlayback(forceReturn)
-    if self.status  ~= AR_ANIMATION_STATUS.PLAYING and not forceReturn then return end
+    if self.status ~= AR_ANIMATION_STATUS.PLAYING and not forceReturn then return end
 
-    self.status = AR_ANIMATION_STATUS.FINISHED
+    if self.LoopMode == AR_LOOP_MODE.NO_LOOP and not forceReturn then
+        self.status = AR_ANIMATION_STATUS.SMOOTH_RETURN
+        self.SmoothReturnStartTime = CurTime()
+    else
+        self.status = AR_ANIMATION_STATUS.FINISHED
+    end
+
     self.IsActivated = false
     -- Remove this box from the active playback boxes
     ActivePlaybackBoxes[self] = nil
@@ -209,6 +215,42 @@ function ENT:Cleanup()
 
 end
 
+function ENT:ProcessSmoothReturn()
+    local smoothReturnDuration = 0.5 -- seconds
+    local progress = (CurTime() - self.SmoothReturnStartTime) / smoothReturnDuration
+
+    if progress >= 1 then
+        self.status = AR_ANIMATION_STATUS.FINISHED
+        for entIndex, info in pairs(self.AnimationInfo or {}) do
+            local ent = Entity(entIndex)
+            if IsValid(ent) then
+                ent:SetPos(info.initialPos)
+                ent:SetAngles(info.initialAng)
+                local phys = ent:GetPhysicsObject()
+                if IsValid(phys) then
+                    phys:EnableMotion(false)
+                end
+            end
+        end
+        return
+    end
+
+    for entIndex, info in pairs(self.AnimationInfo or {}) do
+        local ent = Entity(entIndex)
+        if IsValid(ent) then
+            local startPos = ent:GetPos()
+            local startAng = ent:GetAngles()
+            local targetPos = info.initialPos
+            local targetAng = info.initialAng
+
+            local newPos = LerpVector(progress, startPos, targetPos)
+            local newAng = LerpAngle(progress, startAng, targetAng)
+
+            ent:SetPos(newPos)
+            ent:SetAngles(newAng)
+        end
+    end
+end
 
 function ENT:StartPlayback()
     ARLog("StartPlayback called")
@@ -464,7 +506,7 @@ function ENT:SetupEntityPlayback(entIndex)
         ARLog("Entity " .. entIndex .. " target pos set to: " .. tostring(ent.TargetPos))
         
         -- Immediately apply the first frame position
-        self:ApplyFrameData(ent, frames[i], basePos)
+        self:ApplyFrameData(ent, frames[i], basePos, true)
     else
         ent.TargetPos = ent:GetPos()
         ent.TargetAng = ent:GetAngles()
@@ -480,6 +522,11 @@ end
 
 
 function ENT:ProcessPlayback()
+    if self.status == AR_ANIMATION_STATUS.SMOOTH_RETURN then
+        self:ProcessSmoothReturn()
+        return
+    end
+
     if self.status ~= AR_ANIMATION_STATUS.PLAYING then
         ARLog("Wrong status in process playback: ", self.status)
     return end
@@ -536,7 +583,7 @@ function ENT:ProcessPlayback()
                 end
             end
 
-            self:ApplyFrameData(ent, frame, basePos)
+            self:ApplyFrameData(ent, frame, basePos, false)
             info.LastMoveTime = now
         end
         info.currentFrameIndex = frameIndex
@@ -545,15 +592,21 @@ function ENT:ProcessPlayback()
     self.LastFrameTime = now
 end
 
-function ENT:ApplyFrameData(ent, frame, basePos)
+function ENT:ApplyFrameData(ent, frame, basePos, teleport)
     -- Apply position and angle changes
     if frame.pos and frame.ang then
         local targetPos = frame.pos + basePos
         local targetAng = frame.ang
 
-        -- Move the entity directly
         local phys = ent:GetPhysicsObject()
-        if IsValid(phys) then
+        if not IsValid(phys) then
+            ent:SetPos(targetPos)
+            ent:SetAngles(targetAng)
+        elseif teleport then
+            ent:SetPos(targetPos)
+            ent:SetAngles(targetAng)
+            phys:Wake()
+        else
             local params = {
                 pos = targetPos,
                 angle = targetAng,
@@ -567,10 +620,6 @@ function ENT:ApplyFrameData(ent, frame, basePos)
             }
             phys:Wake()
             phys:ComputeShadowControl(params)
-        else
-            -- Fallback for entities without physics
-            ent:SetPos(targetPos)
-            ent:SetAngles(targetAng)
         end
     else
         ARLog("ApplyFrameData NO pos OR angle", frame.pos, frame.ang)
