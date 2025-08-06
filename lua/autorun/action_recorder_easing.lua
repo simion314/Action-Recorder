@@ -34,13 +34,13 @@ ActionRecorder.EasingFunctions = {
         if t < 1 / d1 then
             return applyModifiers(n1 * t * t, amp, freq, inv, offset)
         elseif t < 2 / d1 then
-            t = t - 1.5 / d1
+            t = t - (1.5 / d1)
             return applyModifiers(n1 * t * t + 0.75, amp, freq, inv, offset)
         elseif t < 2.5 / d1 then
-            t = t - 2.25 / d1
+            t = t - (2.25 / d1)
             return applyModifiers(n1 * t * t + 0.9375, amp, freq, inv, offset)
         else
-            t = t - 2.625 / d1
+            t = t - (2.625 / d1)
             return applyModifiers(n1 * t * t + 0.984375, amp, freq, inv, offset)
         end
     end,
@@ -73,6 +73,8 @@ ActionRecorder.EasingFunctions = {
         if not p1 or not p2 then return t end
 
         local tt = (t - p1.x) / (p2.x - p1.x)
-        return applyModifiers(Lerp(tt, p1.y, p2.y), amp, freq, inv, offset)
+        local ft = tt * math.pi
+        local f = (1 - math.cos(ft)) * 0.5
+        return applyModifiers(p1.y * (1 - f) + p2.y * f, amp, freq, inv, offset)
     end
 }

@@ -422,8 +422,7 @@ function ENT:GetSpeed(currentFrameIndex, frameCount)
     ARLog("GetSpeed called - Easing: " .. tostring(self.Easing) .. ", Frame: " .. currentFrameIndex .. "/" .. frameCount)
     -- Calculate progress for THIS specific entity (0 to 1)
     local progress = currentFrameIndex / frameCount
-    local minSpeed = 0.1
-    local speed = minSpeed
+    local speed = 0
     if not self.Easing then
         --ARLog("Using no easing, returning base speed: " .. self.PlaybackSpeed)
         return self.PlaybackSpeed
@@ -437,9 +436,6 @@ function ENT:GetSpeed(currentFrameIndex, frameCount)
         speed = self.PlaybackSpeed * y
         ARLog("Easing function value for , is and speed ", progress, y, speed)
     end
-   if speed < minSpeed then
-        speed = minSpeed
-   end
         
    --ARLog("Easing calculation - Current: " .. speed)
    return speed
