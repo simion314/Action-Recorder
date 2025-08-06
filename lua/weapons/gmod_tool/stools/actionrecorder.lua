@@ -613,74 +613,9 @@ function TOOL:Holster()
     end
 end
 
-local function GetEasingFunction(name)
-    return ActionRecorder.EasingFunctions[name]
-end
+
 
 if CLIENT then
-    ActionRecorder = ActionRecorder or {}
-    ActionRecorder.EasingFunctions = ActionRecorder.EasingFunctions or {}
-    ActionRecorder.EasingFunctions["Linear"] = function(t, amp, freq, inv, offset) return t end
-    ActionRecorder.EasingFunctions["Sine"] = function(t, amp, freq, inv, offset) return math.sin(t * math.pi * freq + offset) * amp end
-    ActionRecorder.EasingFunctions["Quadratic"] = function(t, amp, freq, inv, offset) return t*t * amp end
-    ActionRecorder.EasingFunctions["Cubic"] = function(t, amp, freq, inv, offset) return t*t*t * amp end
-    ActionRecorder.EasingFunctions["Quartic"] = function(t, amp, freq, inv, offset) return t*t*t*t * amp end
-    ActionRecorder.EasingFunctions["Quintic"] = function(t, amp, freq, inv, offset) return t*t*t*t*t * amp end
-    ActionRecorder.EasingFunctions["Exponential"] = function(t, amp, freq, inv, offset) return math.pow(2, 10 * (t - 1)) * amp end
-    ActionRecorder.EasingFunctions["Circular"] = function(t, amp, freq, inv, offset) return math.sqrt(1 - (t-1)*(t-1)) * amp end
-    ActionRecorder.EasingFunctions["Elastic"] = function(t, amp, freq, inv, offset)
-        if t == 0 or t == 1 then return t end
-        local p = .3
-        local s = p / 4
-        return amp * math.pow(2, -10 * t) * math.sin((t - s) * (2 * math.pi) / p) + 1
-    end
-    ActionRecorder.EasingFunctions["Back"] = function(t, amp, freq, inv, offset)
-        local s = 1.70158
-        return amp * (t*t*((s+1)*t - s))
-    end
-    ActionRecorder.EasingFunctions["Bounce"] = function(t, amp, freq, inv, offset)
-        if t < (1/2.75) then
-            return amp * (7.5625*t*t)
-        elseif t < (2/2.75) then
-            t = t - (1.5/2.75)
-            return amp * (7.5625*t*t + .75)
-        elseif t < (2.5/2.75) then
-            t = t - (2.25/2.75)
-            return amp * (7.5625*t*t + .9375)
-        else
-            t = t - (2.625/2.75)
-            return amp * (7.5625*t*t + .984375)
-        end
-    end
-    ActionRecorder.EasingFunctions["Custom"] = function(t, amp, freq, inv, offset)
-        local points = ActionRecorder.CustomEasingPoints or {{x = 0, y = 0}, {x = 1, y = 1}}
-
-        -- Ensure points are sorted by x (should already be from VGUI, but good to be safe)
-        table.sort(points, function(a, b) return a.x < b.x end)
-
-        -- Handle edge cases for t outside the defined range of points
-        if t <= points[1].x then
-            return points[1].y * amp
-        end
-        if t >= points[#points].x then
-            return points[#points].y * amp
-        end
-
-        local y_val = 0
-        for i = 1, #points - 1 do
-            local p1 = points[i]
-            local p2 = points[i+1]
-
-            if t >= p1.x and t <= p2.x then
-                local range_x = p2.x - p1.x
-                local range_y = p2.y - p1.y
-                local normalized_x = (t - p1.x) / range_x
-                y_val = p1.y + normalized_x * range_y
-                break
-            end
-        end
-        return y_val * amp
-    end
 
     net.Receive("ActionRecorder_PlayStartSound", function()
         if not GetConVar("ar_enable_sounds"):GetBool() then return end

@@ -433,7 +433,7 @@ function ENT:GetSpeed(currentFrameIndex, frameCount)
         ARLog("Easing function not found ", self.Easing)
         speed = self.PlaybackSpeed
     else
-        local y = easing_func(progress)
+        local y = easing_func(progress, self.EasingAmplitude, self.EasingFrequency, self.EasingInvert, self.EasingOffset)
         speed = self.PlaybackSpeed * y
         ARLog("Easing function value for , is and speed ", progress, y, speed)
     end
