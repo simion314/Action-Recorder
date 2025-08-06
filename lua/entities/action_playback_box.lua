@@ -21,7 +21,7 @@ function ENT:Initialize()
     self.PlaybackData = {}
     self.PlaybackSpeed = 1
     self.LoopMode = AR_LOOP_MODE.NO_LOOP
-    self.PlaybackDirection = AR_PLAYBACK_DIRECTION.FORWARD
+    
     self.PlaybackType = AR_PLAYBACK_TYPE.ABSOLUTE
     self.Easing = "Linear"
     self.EasingAmplitude = 1
@@ -100,7 +100,6 @@ function ENT:SetPlaybackData(data)
         self.PlaybackData[id] = frames
         self.AnimationInfo[id] = {
             frameCount = #frames,
-            direction = AR_PLAYBACK_DIRECTION.FORWARD,
             status = AR_ANIMATION_STATUS.NOT_STARTED,
             currentFrameIndex = 1,
             initialPos = nil,
@@ -272,7 +271,7 @@ function ENT:StartPlayback()
     end
     self.LastFrameTime = CurTime()
     self.status = AR_ANIMATION_STATUS.PLAYING
-    self.PlaybackDirection = AR_PLAYBACK_DIRECTION.FORWARD
+    
     self.IsOneTimeSmoothReturn = false
     self.IsActivated = true
 
@@ -281,7 +280,11 @@ function ENT:StartPlayback()
 
     for _, info in pairs(self.AnimationInfo) do
         info.status = AR_ANIMATION_STATUS.PLAYING
-        info.currentFrameIndex = 1
+        if self.PlaybackSpeed >= 0 then
+            info.currentFrameIndex = 1
+        else
+            info.currentFrameIndex = info.frameCount
+        end
         info.LastMoveTime = CurTime()
      end
     -- Create the global timer if it doesn't exist
@@ -361,6 +364,13 @@ function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
     local nextFrameIndex = currentFrameIndex
     local direction = self:calculateDirection()
 
+    if self.LoopMode == AR_LOOP_MODE.NO_LOOP then
+    if (direction > 0 and atEnd) or (direction < 0 and atStart) then
+
+        return currentFrameIndex
+    end
+end
+
     -- Log basic information
     -- ARLog("direction:", direction, "atStart:", atStart, "atEnd:", atEnd, "frameCount:", frameCount)
 
@@ -376,14 +386,14 @@ function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
                 return -1
             elseif self.LoopMode == AR_LOOP_MODE.PING_PONG then
                 --ARLog("Ping pong mode, reversing direction")
-                self.PlaybackDirection = self.PlaybackDirection * (-1)
+                self.PlaybackSpeed = -self.PlaybackSpeed
                 nextFrameIndex = frameCount - 1
             elseif self.LoopMode == AR_LOOP_MODE.LOOP then
                 ARLog("Loop mode, resetting to start")
                 nextFrameIndex = 1
             elseif self.LoopMode == AR_LOOP_MODE.NO_LOOP_SMOOTH then
                 --ARLog("No Loop Smooth mode, reversing direction for one-time return")
-                self.PlaybackDirection = self.PlaybackDirection * (-1)
+                self.PlaybackSpeed = -self.PlaybackSpeed
                 self.IsOneTimeSmoothReturn = true
                 nextFrameIndex = frameCount - 1
             else
@@ -402,13 +412,13 @@ function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
                 return -1
             elseif self.LoopMode == AR_LOOP_MODE.PING_PONG then
                 --ARLog("Ping pong mode, reversing direction")
-                self.PlaybackDirection = self.PlaybackDirection * (-1)
+                self.PlaybackSpeed = -self.PlaybackSpeed
                 nextFrameIndex = 2
             elseif self.LoopMode == AR_LOOP_MODE.LOOP then
                 --ARLog("Loop mode, resetting to end")
                 nextFrameIndex = frameCount
-            elseif self.LoopMode == AR_LOOP_MODE.NO_LOOP_SMOOTH and self.IsOneTimeSmoothReturn then
-                --ARLog("No Loop Smooth mode, finished one-time return")
+            elseif self.LoopMode == AR_LOOP_MODE.NO_LOOP_SMOOTH then
+                --ARLog("No Loop Smooth mode, finished one-time return or initial reverse")
                 return -1 -- Animation finished
             end
         end
@@ -513,9 +523,11 @@ function ENT:SetupEntityPlayback(entIndex)
 end
 
 function ENT:calculateDirection()
-    return (self.PlaybackDirection * (self.PlaybackSpeed < 0 and -1 or 1))
+    if self.PlaybackSpeed == 0 then
+        return 0
+    end
+    return (self.PlaybackSpeed > 0) and 1 or -1
 end
-
 
 function ENT:ProcessPlayback()
     if self.status == AR_ANIMATION_STATUS.SMOOTH_RETURN then
