@@ -22,6 +22,10 @@ if SERVER then
     CreateConVar("actionrecorder_easing_frequency", "1", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
     CreateConVar("actionrecorder_easing_invert", "0", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
     CreateConVar("actionrecorder_easing_offset", "0", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
+	CreateConVar("actionrecorder_labelcolor_r", "0", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
+	CreateConVar("actionrecorder_labelcolor_g", "0", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
+	CreateConVar("actionrecorder_labelcolor_b", "0", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
+	CreateConVar("actionrecorder_labelcolor_rainbow", "0", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
 else
     CreateClientConVar("actionrecorder_playbackspeed", "1", true, true)
     CreateClientConVar("actionrecorder_loop", "0", true, true)
@@ -37,6 +41,10 @@ else
     CreateClientConVar("actionrecorder_easing_frequency", "1", true, true)
     CreateClientConVar("actionrecorder_easing_invert", "0", true, true)
     CreateClientConVar("actionrecorder_easing_offset", "0", true, true)
+	CreateClientConVar("actionrecorder_labelcolor_r", "255", true, false)
+    CreateClientConVar("actionrecorder_labelcolor_g", "255", true, false)
+    CreateClientConVar("actionrecorder_labelcolor_b", "255", true, false)
+	CreateClientConVar("actionrecorder_labelcolor_rainbow", "0", true, false)
 end
 
 if SERVER then
@@ -276,6 +284,10 @@ function TOOL:RightClick(trace)
         easing_offset = GetConVar("actionrecorder_easing_offset"):GetFloat()
         physicsless = GetConVar("ar_physicsless_teleport"):GetBool()
         freezeonend = GetConVar("actionrecorder_freezeonend"):GetBool()
+		label_r = GetConVar("actionrecorder_labelcolor_r"):GetInt()
+        label_g = GetConVar("actionrecorder_labelcolor_g"):GetInt()
+        label_b = GetConVar("actionrecorder_labelcolor_b"):GetInt()
+		label_rainbow = GetConVar("actionrecorder_labelcolor_rainbow"):GetBool()
     else
         speed = ply:GetInfoNum("actionrecorder_playbackspeed", 1)
         loop = ply:GetInfoNum("actionrecorder_loop", 0)
@@ -290,7 +302,11 @@ function TOOL:RightClick(trace)
         easing_invert = ply:GetInfoNum("actionrecorder_easing_invert", 0) == 1
         easing_offset = ply:GetInfoNum("actionrecorder_easing_offset", 0)
         physicsless = ply:GetInfoNum("ar_physicsless_teleport", 0) == 1
-        freezeonend = ply:GetInfoNum("actionrecorder_freezeonend", 0) == 1 
+        freezeonend = ply:GetInfoNum("actionrecorder_freezeonend", 0) == 1
+        label_r = ply:GetInfoNum("actionrecorder_labelcolor_r", 255)
+        label_g = ply:GetInfoNum("actionrecorder_labelcolor_g", 255)
+        label_b = ply:GetInfoNum("actionrecorder_labelcolor_b", 255)
+        label_rainbow = ply:GetInfoNum("actionrecorder_labelcolor_rainbow", 0) 		
     end
 
     for _, ent in pairs(ents.FindByClass("action_playback_box")) do
@@ -504,6 +520,20 @@ function TOOL.BuildCPanel(panel)
     local keyBinder = vgui.Create("DBinder")
     keyBinder:SetConVar("actionrecorder_key")
     generalSettingsForm:AddItem(keyBinder)
+	
+	local colorPickerButton = vgui.Create("DButton", generalSettingsForm)
+    colorPickerButton:SetText("Change Label Color")
+    colorPickerButton:SetToolTip("Open color palette to change label color")
+    colorPickerButton:SetTall(25)
+    colorPickerButton.DoClick = function()
+    if not IsValid(MyColorPickerFrame) then
+        MyColorPickerFrame = vgui.Create("MyColorPickerFrame")
+    end
+    MyColorPickerFrame:MakePopup()
+    MyColorPickerFrame:Center()
+    end
+    generalSettingsForm:AddItem(colorPickerButton)
+
 
     local sectionDivider = vgui.Create("DPanel", panel)
     sectionDivider:SetTall(2)
@@ -639,7 +669,6 @@ if CLIENT then
         notification.AddLegacy(msg, typ, 5)
     end)
 
-    
     local loopActive = false
     local LOOP_FILE = "action_recorder/recording_loop.wav"
     local LOOP_DURATION = 1.2
@@ -683,4 +712,68 @@ if CLIENT then
             end
         end
     end)
+
+
+    local PANEL = {}
+
+    function PANEL:Init()
+        self:SetSize(350, 200)
+        self:SetTitle("Select Label Color")
+        self:Center()
+        self:MakePopup()
+
+        self.ColorLabel = vgui.Create("DLabel", self)
+        self.ColorLabel:SetText("Preview Label Color")
+        self.ColorLabel:SetFont("DermaLarge")
+        self.ColorLabel:Dock(TOP)
+        self.ColorLabel:DockMargin(10, 10, 10, 10)
+        self.ColorLabel:SizeToContents()
+
+        local r = GetConVar("actionrecorder_labelcolor_r"):GetInt()
+        local g = GetConVar("actionrecorder_labelcolor_g"):GetInt()
+        local b = GetConVar("actionrecorder_labelcolor_b"):GetInt()
+        local col = Color(r, g, b, 255)
+        self.ColorLabel:SetTextColor(col)
+
+        self.ColorMixer = vgui.Create("DColorMixer", self)
+        self.ColorMixer:Dock(FILL)
+        self.ColorMixer:SetColor(col)
+
+        self.RainbowCheckbox = vgui.Create("DCheckBoxLabel", self)
+        self.RainbowCheckbox:SetText("Enable Rainbow")
+        self.RainbowCheckbox:Dock(TOP)
+        self.RainbowCheckbox:DockMargin(10, 5, 10, 10)
+        self.RainbowCheckbox:SetConVar("actionrecorder_labelcolor_rainbow")
+
+        self.RainbowHue = 0
+        self.RainbowActive = GetConVar("actionrecorder_labelcolor_rainbow"):GetBool()
+
+        self.Think = function()
+            self.RainbowActive = GetConVar("actionrecorder_labelcolor_rainbow"):GetBool()
+            if self.RainbowActive then
+                self.ColorMixer:SetDisabled(true)
+                self.RainbowHue = (self.RainbowHue + 0.01) % 1
+                local rainbowColor = HSVToColor(self.RainbowHue * 360, 1, 1)
+                self.ColorLabel:SetTextColor(rainbowColor)
+                self.ColorMixer:SetColor(rainbowColor)
+                RunConsoleCommand("actionrecorder_labelcolor_r", rainbowColor.r)
+                RunConsoleCommand("actionrecorder_labelcolor_g", rainbowColor.g)
+                RunConsoleCommand("actionrecorder_labelcolor_b", rainbowColor.b)
+            else
+                self.ColorMixer:SetDisabled(false)
+            end
+        end
+
+        self.ColorMixer.ValueChanged = function(self2, color)
+            if self.RainbowActive then return end
+            self.ColorLabel:SetTextColor(color)
+
+            RunConsoleCommand("actionrecorder_labelcolor_r", color.r)
+            RunConsoleCommand("actionrecorder_labelcolor_g", color.g)
+            RunConsoleCommand("actionrecorder_labelcolor_b", color.b)
+        end
+    end
+
+    vgui.Register("MyColorPickerFrame", PANEL, "DFrame")
+
 end

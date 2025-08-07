@@ -7,6 +7,7 @@ ENT.PrintName = "Action Playback Box"
 ENT.Category = "Utility"
 ENT.Spawnable = false
 ENT.SoundPath = "buttons/button1.wav"
+ENT.RenderGroup = RENDERGROUP_OPAQUE --Makes the background/label fully non transparent. Not really.
 
 -- Global playback timer
 local GLOBAL_PLAYBACK_TIMER = "ActionRecorder_GlobalPlayback"
@@ -649,19 +650,55 @@ end
 if CLIENT then
     function ENT:Draw()
         self:DrawModel()
-        local id = self:GetNWString("BoxID", self.BoxID or "")
-        local ownerName = self:GetNWString("OwnerName", "Unknown")
-        if id ~= "" and LocalPlayer():GetPos():DistToSqr(self:GetPos()) < 300*300 then
-            local pos = self:GetPos() + Vector(0,0,40)
-            local ang = Angle(0, LocalPlayer():EyeAngles().y - 90, 90)
-            cam.Start3D2D(pos, ang, 0.2)
-                draw.RoundedBox(8, -100, -45, 200, 70, Color(255, 255, 150, 230))
-                draw.SimpleText(id, "DermaLarge", 0, -10, Color(0,0,0,255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-                draw.SimpleTextOutlined("(" .. ownerName .. ")", "DermaDefault", 0, 10, Color(0,255,0,200), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER, 2, Color(0,0,0,180))
-            cam.End3D2D()
-        end
+
+        local id = self:GetNWString("BoxID", "") or ""
+        local ownerName = self:GetNWString("OwnerName", "Unknown") or "Unknown"
+        local distSqr = LocalPlayer():GetPos():DistToSqr(self:GetPos())
+
+        
+        if id == "" or distSqr > (300 * 300) then return end
+
+        local pos = self:GetPos() + Vector(0, 0, 40) 
+        local ang = Angle(0, LocalPlayer():EyeAngles().y - 90, 90) 
+
+        cam.Start3D2D(pos, ang, 0.2)
+            
+            local useRainbow = GetConVar("actionrecorder_labelcolor_rainbow"):GetBool()
+            local backgroundColor
+            if useRainbow then
+                local hue = (CurTime() * 100) % 360
+                backgroundColor = HSVToColor(hue, 1, 1)
+                backgroundColor.a = 255
+            else
+                local r = GetConVar("actionrecorder_labelcolor_r"):GetInt()
+                local g = GetConVar("actionrecorder_labelcolor_g"):GetInt()
+                local b = GetConVar("actionrecorder_labelcolor_b"):GetInt()
+                backgroundColor = Color(r, g, b, 255) --Where 255 is transparency
+            end
+
+            local labelColor = Color(0, 0, 0, 255)
+
+            
+            draw.RoundedBox(8, -100, -45, 200, 70, backgroundColor)
+
+            
+            local iconPath = self.CustomIconPath or "icon16/box.png"
+            surface.SetDrawColor(255, 255, 255, 255)
+            surface.SetMaterial(Material(iconPath))
+            surface.DrawTexturedRect(-90, -40, 32, 32)
+
+            
+            draw.SimpleText(id, "DermaLarge", 0, -10, labelColor, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+
+            
+            draw.SimpleTextOutlined("(" .. ownerName .. ")", "DermaDefault", 0, 10, Color(0, 255, 0, 200),
+                TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER, 2, Color(0, 0, 0, 180))
+        cam.End3D2D()
     end
 end
+
+
+
 
 
 if SERVER then
