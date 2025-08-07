@@ -7,7 +7,6 @@ ENT.PrintName = "Action Playback Box"
 ENT.Category = "Utility"
 ENT.Spawnable = false
 ENT.SoundPath = "buttons/button1.wav"
-ENT.RenderGroup = RENDERGROUP_OPAQUE --Makes the background/label fully non transparent. Not really.
 
 -- Global playback timer
 local GLOBAL_PLAYBACK_TIMER = "ActionRecorder_GlobalPlayback"
@@ -18,16 +17,11 @@ function ENT:Initialize()
     self:SetSolid(SOLID_VPHYSICS)
     if SERVER then
         self:SetUseType(SIMPLE_USE)
-        self:SetNWInt("LabelColorR", 255)
-        self:SetNWInt("LabelColorG", 255)
-        self:SetNWInt("LabelColorB", 255)
-        self:SetNWInt("LabelColorA", 255)
-        self:SetNWBool("LabelRainbow", false)
     end
     self.PlaybackData = {}
     self.PlaybackSpeed = 1
     self.LoopMode = AR_LOOP_MODE.NO_LOOP
-    
+    self.PlaybackDirection = AR_PLAYBACK_DIRECTION.FORWARD
     self.PlaybackType = AR_PLAYBACK_TYPE.ABSOLUTE
     self.Easing = "Linear"
     self.EasingAmplitude = 1
@@ -106,6 +100,7 @@ function ENT:SetPlaybackData(data)
         self.PlaybackData[id] = frames
         self.AnimationInfo[id] = {
             frameCount = #frames,
+            direction = AR_PLAYBACK_DIRECTION.FORWARD,
             status = AR_ANIMATION_STATUS.NOT_STARTED,
             currentFrameIndex = 1,
             initialPos = nil,
@@ -114,7 +109,7 @@ function ENT:SetPlaybackData(data)
    end
    self.status = AR_ANIMATION_STATUS.NOT_STARTED
 end
-function ENT:SetPlaybackSettings(speed, loopMode, playbackType, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset, label_r, label_g, label_b, label_a, label_rainbow)              
+function ENT:SetPlaybackSettings(speed, loopMode, playbackType, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset)
     self.PlaybackSpeed = speed or 1
     self.LoopMode = loopMode or AR_LOOP_MODE.NO_LOOP
     self.PlaybackType = playbackType or AR_PLAYBACK_TYPE.ABSOLUTE
@@ -123,13 +118,6 @@ function ENT:SetPlaybackSettings(speed, loopMode, playbackType, easing, easing_a
     self.EasingFrequency = easing_frequency or 1
     self.EasingInvert = easing_invert or false
     self.EasingOffset = easing_offset or 0
-    if SERVER then
-        self:SetNWInt("LabelColorR", label_r or 255)
-        self:SetNWInt("LabelColorG", label_g or 255)
-        self:SetNWInt("LabelColorB", label_b or 255)
-        self:SetNWInt("LabelColorA", label_a or 255)
-        self:SetNWBool("LabelRainbow", label_rainbow or false)
-    end
 end
 
 function ENT:SetBoxID(id)
@@ -154,14 +142,12 @@ end
 
 function ENT:UpdateSettings(
     speed, loopMode, playbackType, model, boxid, soundpath,
-    easing, easing_amplitude, easing_frequency, easing_invert, easing_offset, physicsless, freezeonend,
-    label_r, label_g, label_b, label_a, label_rainbow
+    easing, easing_amplitude, easing_frequency, easing_invert, easing_offset, physicsless, freezeonend
 )
     self:StopPlayback()
     self:SetPlaybackSettings(
         speed, loopMode, playbackType,
-        easing, easing_amplitude, easing_frequency, easing_invert, easing_offset, physicsless,   
-        label_r, label_g, label_b, label_a, label_rainbow
+        easing, easing_amplitude, easing_frequency, easing_invert, easing_offset, physicsless
     )
     self:SetModelPath(model)
     self:SetBoxID(boxid)
@@ -286,7 +272,7 @@ function ENT:StartPlayback()
     end
     self.LastFrameTime = CurTime()
     self.status = AR_ANIMATION_STATUS.PLAYING
-    
+    self.PlaybackDirection = AR_PLAYBACK_DIRECTION.FORWARD
     self.IsOneTimeSmoothReturn = false
     self.IsActivated = true
 
@@ -295,11 +281,7 @@ function ENT:StartPlayback()
 
     for _, info in pairs(self.AnimationInfo) do
         info.status = AR_ANIMATION_STATUS.PLAYING
-        if self.PlaybackSpeed >= 0 then
-            info.currentFrameIndex = 1
-        else
-            info.currentFrameIndex = info.frameCount
-        end
+        info.currentFrameIndex = 1
         info.LastMoveTime = CurTime()
      end
     -- Create the global timer if it doesn't exist
@@ -379,13 +361,6 @@ function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
     local nextFrameIndex = currentFrameIndex
     local direction = self:calculateDirection()
 
-    if self.LoopMode == AR_LOOP_MODE.NO_LOOP then
-    if (direction > 0 and atEnd) or (direction < 0 and atStart) then
-
-        return currentFrameIndex
-    end
-end
-
     -- Log basic information
     -- ARLog("direction:", direction, "atStart:", atStart, "atEnd:", atEnd, "frameCount:", frameCount)
 
@@ -401,14 +376,14 @@ end
                 return -1
             elseif self.LoopMode == AR_LOOP_MODE.PING_PONG then
                 --ARLog("Ping pong mode, reversing direction")
-                self.PlaybackSpeed = -self.PlaybackSpeed
+                self.PlaybackDirection = self.PlaybackDirection * (-1)
                 nextFrameIndex = frameCount - 1
             elseif self.LoopMode == AR_LOOP_MODE.LOOP then
                 ARLog("Loop mode, resetting to start")
                 nextFrameIndex = 1
             elseif self.LoopMode == AR_LOOP_MODE.NO_LOOP_SMOOTH then
                 --ARLog("No Loop Smooth mode, reversing direction for one-time return")
-                self.PlaybackSpeed = -self.PlaybackSpeed
+                self.PlaybackDirection = self.PlaybackDirection * (-1)
                 self.IsOneTimeSmoothReturn = true
                 nextFrameIndex = frameCount - 1
             else
@@ -427,13 +402,13 @@ end
                 return -1
             elseif self.LoopMode == AR_LOOP_MODE.PING_PONG then
                 --ARLog("Ping pong mode, reversing direction")
-                self.PlaybackSpeed = -self.PlaybackSpeed
+                self.PlaybackDirection = self.PlaybackDirection * (-1)
                 nextFrameIndex = 2
             elseif self.LoopMode == AR_LOOP_MODE.LOOP then
                 --ARLog("Loop mode, resetting to end")
                 nextFrameIndex = frameCount
-            elseif self.LoopMode == AR_LOOP_MODE.NO_LOOP_SMOOTH then
-                --ARLog("No Loop Smooth mode, finished one-time return or initial reverse")
+            elseif self.LoopMode == AR_LOOP_MODE.NO_LOOP_SMOOTH and self.IsOneTimeSmoothReturn then
+                --ARLog("No Loop Smooth mode, finished one-time return")
                 return -1 -- Animation finished
             end
         end
@@ -538,11 +513,9 @@ function ENT:SetupEntityPlayback(entIndex)
 end
 
 function ENT:calculateDirection()
-    if self.PlaybackSpeed == 0 then
-        return 0
-    end
-    return (self.PlaybackSpeed > 0) and 1 or -1
+    return (self.PlaybackDirection * (self.PlaybackSpeed < 0 and -1 or 1))
 end
+
 
 function ENT:ProcessPlayback()
     if self.status == AR_ANIMATION_STATUS.SMOOTH_RETURN then
@@ -711,9 +684,6 @@ if CLIENT then
         cam.End3D2D()
     end
 end
-
-
-
 
 
 if SERVER then
