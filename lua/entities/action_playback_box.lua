@@ -18,6 +18,11 @@ function ENT:Initialize()
     self:SetSolid(SOLID_VPHYSICS)
     if SERVER then
         self:SetUseType(SIMPLE_USE)
+        self:SetNWInt("LabelColorR", 255)
+        self:SetNWInt("LabelColorG", 255)
+        self:SetNWInt("LabelColorB", 255)
+        self:SetNWInt("LabelColorA", 255)
+        self:SetNWBool("LabelRainbow", false)
     end
     self.PlaybackData = {}
     self.PlaybackSpeed = 1
@@ -109,7 +114,7 @@ function ENT:SetPlaybackData(data)
    end
    self.status = AR_ANIMATION_STATUS.NOT_STARTED
 end
-function ENT:SetPlaybackSettings(speed, loopMode, playbackType, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset)
+function ENT:SetPlaybackSettings(speed, loopMode, playbackType, easing, easing_amplitude, easing_frequency, easing_invert, easing_offset, label_r, label_g, label_b, label_a, label_rainbow)              
     self.PlaybackSpeed = speed or 1
     self.LoopMode = loopMode or AR_LOOP_MODE.NO_LOOP
     self.PlaybackType = playbackType or AR_PLAYBACK_TYPE.ABSOLUTE
@@ -118,6 +123,13 @@ function ENT:SetPlaybackSettings(speed, loopMode, playbackType, easing, easing_a
     self.EasingFrequency = easing_frequency or 1
     self.EasingInvert = easing_invert or false
     self.EasingOffset = easing_offset or 0
+    if SERVER then
+        self:SetNWInt("LabelColorR", label_r or 255)
+        self:SetNWInt("LabelColorG", label_g or 255)
+        self:SetNWInt("LabelColorB", label_b or 255)
+        self:SetNWInt("LabelColorA", label_a or 255)
+        self:SetNWBool("LabelRainbow", label_rainbow or false)
+    end
 end
 
 function ENT:SetBoxID(id)
@@ -142,12 +154,14 @@ end
 
 function ENT:UpdateSettings(
     speed, loopMode, playbackType, model, boxid, soundpath,
-    easing, easing_amplitude, easing_frequency, easing_invert, easing_offset, physicsless, freezeonend
+    easing, easing_amplitude, easing_frequency, easing_invert, easing_offset, physicsless, freezeonend,
+    label_r, label_g, label_b, label_a, label_rainbow
 )
     self:StopPlayback()
     self:SetPlaybackSettings(
         speed, loopMode, playbackType,
-        easing, easing_amplitude, easing_frequency, easing_invert, easing_offset, physicsless
+        easing, easing_amplitude, easing_frequency, easing_invert, easing_offset, physicsless,   
+        label_r, label_g, label_b, label_a, label_rainbow
     )
     self:SetModelPath(model)
     self:SetBoxID(boxid)
@@ -663,17 +677,18 @@ if CLIENT then
 
         cam.Start3D2D(pos, ang, 0.2)
             
-            local useRainbow = GetConVar("actionrecorder_labelcolor_rainbow"):GetBool()
+            local useRainbow = self:GetNWBool("LabelRainbow", false)
             local backgroundColor
             if useRainbow then
                 local hue = (CurTime() * 100) % 360
                 backgroundColor = HSVToColor(hue, 1, 1)
-                backgroundColor.a = 255
+                backgroundColor.a = self:GetNWInt("LabelColorA", 255)
             else
-                local r = GetConVar("actionrecorder_labelcolor_r"):GetInt()
-                local g = GetConVar("actionrecorder_labelcolor_g"):GetInt()
-                local b = GetConVar("actionrecorder_labelcolor_b"):GetInt()
-                backgroundColor = Color(r, g, b, 255) --Where 255 is transparency
+                local r = self:GetNWInt("LabelColorR", 255)
+                local g = self:GetNWInt("LabelColorG", 255)
+                local b = self:GetNWInt("LabelColorB", 255)
+                local a = self:GetNWInt("LabelColorA", 255)
+                backgroundColor = Color(r, g, b, a) --Where a is transparency
             end
 
             local labelColor = Color(0, 0, 0, 255)
@@ -688,7 +703,7 @@ if CLIENT then
             surface.DrawTexturedRect(-90, -40, 32, 32)
 
             
-            draw.SimpleText(id, "DermaLarge", 0, -10, labelColor, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+            draw.SimpleText(id, "DermaLarge", 0, -10, Color(0,0,0,255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 
             
             draw.SimpleTextOutlined("(" .. ownerName .. ")", "DermaDefault", 0, 10, Color(0, 255, 0, 200),

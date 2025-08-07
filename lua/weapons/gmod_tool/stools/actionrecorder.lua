@@ -22,9 +22,10 @@ if SERVER then
     CreateConVar("actionrecorder_easing_frequency", "1", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
     CreateConVar("actionrecorder_easing_invert", "0", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
     CreateConVar("actionrecorder_easing_offset", "0", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
-	CreateConVar("actionrecorder_labelcolor_r", "0", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
-	CreateConVar("actionrecorder_labelcolor_g", "0", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
-	CreateConVar("actionrecorder_labelcolor_b", "0", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
+	CreateConVar("actionrecorder_labelcolor_r", "255", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
+	CreateConVar("actionrecorder_labelcolor_g", "255", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
+	CreateConVar("actionrecorder_labelcolor_b", "255", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
+    CreateConVar("actionrecorder_labelcolor_a", "255", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
 	CreateConVar("actionrecorder_labelcolor_rainbow", "0", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
 else
     CreateClientConVar("actionrecorder_playbackspeed", "1", true, true)
@@ -44,6 +45,7 @@ else
 	CreateClientConVar("actionrecorder_labelcolor_r", "255", true, false)
     CreateClientConVar("actionrecorder_labelcolor_g", "255", true, false)
     CreateClientConVar("actionrecorder_labelcolor_b", "255", true, false)
+    CreateClientConVar("actionrecorder_labelcolor_a", "255", true, false)
 	CreateClientConVar("actionrecorder_labelcolor_rainbow", "0", true, false)
 end
 
@@ -267,7 +269,7 @@ function TOOL:RightClick(trace)
     local globalMode = GetConVar("actionrecorder_globalmode"):GetBool()
     local speed, loop, playbackType, model, boxid, key, soundpath
     local easing, easing_amplitude, easing_frequency, easing_invert, easing_offset
-    local physicsless, freezeonend
+    local physicsless, freezeonend, label_r, label_g, label_b, label_a, label_rainbow
 
     if globalMode and ply:IsAdmin() then
         speed = tonumber(GetConVar("actionrecorder_playbackspeed"):GetString()) or 1
@@ -287,6 +289,7 @@ function TOOL:RightClick(trace)
 		label_r = GetConVar("actionrecorder_labelcolor_r"):GetInt()
         label_g = GetConVar("actionrecorder_labelcolor_g"):GetInt()
         label_b = GetConVar("actionrecorder_labelcolor_b"):GetInt()
+        label_a = GetConVar("actionrecorder_labelcolor_a"):GetInt()
 		label_rainbow = GetConVar("actionrecorder_labelcolor_rainbow"):GetBool()
     else
         speed = ply:GetInfoNum("actionrecorder_playbackspeed", 1)
@@ -306,7 +309,8 @@ function TOOL:RightClick(trace)
         label_r = ply:GetInfoNum("actionrecorder_labelcolor_r", 255)
         label_g = ply:GetInfoNum("actionrecorder_labelcolor_g", 255)
         label_b = ply:GetInfoNum("actionrecorder_labelcolor_b", 255)
-        label_rainbow = ply:GetInfoNum("actionrecorder_labelcolor_rainbow", 0) 		
+        label_a = ply:GetInfoNum("actionrecorder_labelcolor_a", 255)
+        label_rainbow = ply:GetInfoNum("actionrecorder_labelcolor_rainbow", 0) == 1 		
     end
 
     for _, ent in pairs(ents.FindByClass("action_playback_box")) do
@@ -340,11 +344,10 @@ function TOOL:RightClick(trace)
         found_box_owned:UpdateSettings(
             speed, loop, playbackType, model, boxid, soundpath,
             easing, easing_amplitude, easing_frequency, easing_invert, easing_offset,
-            physicsless, freezeonend
+            physicsless, freezeonend,
+            label_r, label_g, label_b, label_a, label_rainbow
         )
         found_box_owned.NumpadKey = key
-        found_box_owned:SetPhysicslessTeleport(physicsless)
-        found_box_owned:SetNWBool("FreezeOnEnd", freezeonend) 
         found_box_owned:SetupNumpad()
 
         net.Start("ActionRecorderNotify")
@@ -369,7 +372,8 @@ function TOOL:RightClick(trace)
     ent:SetPlaybackData(ply.ActionRecordData)
     ent:SetPlaybackSettings(
         speed, loop, playbackType,
-        easing, easing_amplitude, easing_frequency, easing_invert, easing_offset, physicsless, freezeonend
+        easing, easing_amplitude, easing_frequency, easing_invert, easing_offset,
+        label_r, label_g, label_b, label_a, label_rainbow
     )
     ent:SetModelPath(model)
     ent:SetBoxID(boxid)
@@ -732,7 +736,8 @@ if CLIENT then
         local r = GetConVar("actionrecorder_labelcolor_r"):GetInt()
         local g = GetConVar("actionrecorder_labelcolor_g"):GetInt()
         local b = GetConVar("actionrecorder_labelcolor_b"):GetInt()
-        local col = Color(r, g, b, 255)
+        local a = GetConVar("actionrecorder_labelcolor_a"):GetInt()
+        local col = Color(r, g, b, a)
         self.ColorLabel:SetTextColor(col)
 
         self.ColorMixer = vgui.Create("DColorMixer", self)
@@ -771,6 +776,7 @@ if CLIENT then
             RunConsoleCommand("actionrecorder_labelcolor_r", color.r)
             RunConsoleCommand("actionrecorder_labelcolor_g", color.g)
             RunConsoleCommand("actionrecorder_labelcolor_b", color.b)
+            RunConsoleCommand("actionrecorder_labelcolor_a", color.a)
         end
     end
 
