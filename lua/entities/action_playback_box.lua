@@ -433,11 +433,12 @@ function ENT:advanceFrames(amount, info)
 end
 
 function ENT:GetSpeed(currentFrameIndex, frameCount)
-    --ARLog("GetSpeed called - Easing: " .. tostring(self.Easing) .. ", Frame: " .. currentFrameIndex .. "/" .. frameCount)
+    --ARLog("GetSpeed called " , self.Easing)
     -- Calculate progress for THIS specific entity (0 to 1)
     local progress = currentFrameIndex / frameCount
-    local speed = 0
-    if not self.Easing then
+    local minSpeed = 0.1
+    local speed = minSpeed
+    if not self.Easing or self.Easing == "None" then
         --ARLog("Using no easing, returning base speed: " .. self.PlaybackSpeed)
         return self.PlaybackSpeed
     end
@@ -446,11 +447,14 @@ function ENT:GetSpeed(currentFrameIndex, frameCount)
         ARLog("Easing function not found ", self.Easing)
         speed = self.PlaybackSpeed
     else
-        local y = easing_func(progress, self.EasingAmplitude, self.EasingFrequency, self.EasingInvert, self.EasingOffset)
-        speed = self.PlaybackSpeed * y
+       local y = easing_func(progress, self.EasingAmplitude, self.EasingFrequency, self.EasingInvert, self.EasingOffset)
+               speed = self.PlaybackSpeed * y
         --ARLog("Easing function value for , is and speed ", progress, y, speed)
     end
-        
+   if speed < minSpeed then
+        speed = minSpeed
+   end
+
    --ARLog("Easing calculation - Current: " .. speed)
    return speed
 end
@@ -464,23 +468,29 @@ function ENT:calculateNextFrame(info)
     --ARLog("calculateNextFrame: speed=" .. speed .. ", currentFrame=" .. currentFrameIndex .. ", totalFrames=" .. framesCount)
     if (speed == 0) then
         ARLog("Speed is zero for ") -- TODO add the box id in the message
-        return currentFrameIndex -- Keep the current frame if speed is zero
+        return 1 -- move object at first frame if he set speed to 0
     end
+    local moveTimeInterval = GLOBAL_TIMER_INTERVAL / math.abs(speed) --dividing with a num less then 1 will increase the numerator
 
-    local moveTimeInterval = GLOBAL_TIMER_INTERVAL / math.abs(speed)
     local now = CurTime()
     local timeSinceLastMove = now - lastMoveTime
-
-    if timeSinceLastMove < moveTimeInterval then
-        return currentFrameIndex -- Not enough time has passed to advance to the next frame
+    -- if speed is small we might not need to move to next frame
+    if (math.abs(speed) < 1) then
+        --ARLog("speed < 1: " .. speed .. ", timeSinceLastMove: " .. timeSinceLastMove .. ", moveTimeInterval: " .. moveTimeInterval)
+        if timeSinceLastMove < moveTimeInterval then
+            -- Return decimal frame index for smooth interpolation
+            local progress = timeSinceLastMove / moveTimeInterval
+            local decimalFrameIndex = currentFrameIndex + progress
+            ARLog("returning decimal frame index " .. decimalFrameIndex)
+            return decimalFrameIndex
+        else -- we need to advance 1 frame
+           --ARLog("advancing 1 frame from " .. currentFrameIndex)
+           return self:advanceFrames(1, info)
+        end
+    else --case speed is greate then 1 in abs value
+        local framesToMove = math.floor(timeSinceLastMove / moveTimeInterval)
+        return self:advanceFrames(framesToMove, info)
     end
-
-    local framesToMove = math.floor(timeSinceLastMove / moveTimeInterval)
-    if framesToMove == 0 then
-        framesToMove = 1 -- Ensure at least one frame is advanced
-    end
-
-    return self:advanceFrames(framesToMove, info)
 end
 
 function ENT:SetupEntityPlayback(entIndex)
@@ -534,6 +544,56 @@ function ENT:calculateDirection()
 end
 
 
+  function interpolateFrame(frames, decimalIndex, direction)
+    if math.floor(decimalIndex) == decimalIndex then
+        return frames[decimalIndex]
+    end
+
+    local frameIndex = math.floor(math.abs(decimalIndex))
+    local alpha = decimalIndex - frameIndex
+
+    -- Get current and next frame indices based on direction
+    local currentFrameIndex = frameIndex
+    local nextFrameIndex
+
+    if direction > 0 then
+        nextFrameIndex = math.min(frameIndex + 1, #frames)
+    else
+        nextFrameIndex = math.max(frameIndex - 1, 1)
+    end
+
+    local currentFrame = frames[currentFrameIndex]
+    local nextFrame = frames[nextFrameIndex]
+
+    if not currentFrame or not nextFrame then
+        return currentFrame or nextFrame
+    end
+
+    -- Clone current frame
+    local interpolatedFrame = table.Copy(currentFrame)
+
+    -- Interpolate position
+    if currentFrame.pos and nextFrame.pos then
+        interpolatedFrame.pos = LerpVector(alpha, currentFrame.pos, nextFrame.pos)
+    end
+
+    -- Interpolate angles
+    if currentFrame.ang and nextFrame.ang then
+        interpolatedFrame.ang = LerpAngle(alpha, currentFrame.ang, nextFrame.ang)
+    end
+
+    -- Interpolate color if present
+    if currentFrame.color and nextFrame.color then
+        interpolatedFrame.color = Color(
+            Lerp(alpha, currentFrame.color.r, nextFrame.color.r),
+            Lerp(alpha, currentFrame.color.g, nextFrame.color.g),
+            Lerp(alpha, currentFrame.color.b, nextFrame.color.b),
+            Lerp(alpha, currentFrame.color.a, nextFrame.color.a)
+        )
+    end
+
+    return interpolatedFrame
+end
 function ENT:ProcessPlayback()
     if self.status == AR_ANIMATION_STATUS.SMOOTH_RETURN then
         self:ProcessSmoothReturn()
@@ -585,8 +645,16 @@ function ENT:ProcessPlayback()
          end
 
         -- Calculate the base position and handle decimal frame indices
-        local frame = frames[frameIndex]
-        
+        local frame
+         if math.floor(frameIndex) == frameIndex then
+                    -- Whole number frame index
+                    frame = frames[frameIndex]
+         else
+                    -- Decimal frame index - use interpolation
+                    local direction = self:calculateDirection()
+                    frame = interpolateFrame(frames, frameIndex, direction)
+         end
+
         if frame then
             local basePos = Vector(0,0,0)
             if self.PlaybackType == AR_PLAYBACK_TYPE.RELATIVE and frame.pos then
