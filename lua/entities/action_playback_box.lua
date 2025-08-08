@@ -118,7 +118,13 @@ function ENT:SetPlaybackSettings(speed, loopMode, playbackType, easing, easing_a
     self.EasingFrequency = easing_frequency or 1
     self.EasingInvert = easing_invert or false
     self.EasingOffset = easing_offset or 0
+
+    if SERVER then
+        
+        self:SetNWInt("LoopMode", self.LoopMode)
+    end
 end
+
 
 function ENT:SetBoxID(id)
     self.BoxID = id or "Box"
@@ -154,6 +160,7 @@ function ENT:UpdateSettings(
     self:SetSoundPath(soundpath)
     self:SetPhysicslessTeleport(physicsless)
     self:SetNWBool("FreezeOnEnd", freezeonend)
+	self:SetNWInt("LoopMode", loopMode or 0)
     self:SetupNumpad()
     self:StartPlayback()
 end
@@ -178,9 +185,15 @@ local function IsPropControlledByOtherBox(prop, myBox)
 end
 
 function ENT:StopPlayback(forceReturn)
-    if self.status  ~= AR_ANIMATION_STATUS.PLAYING and not forceReturn then return end
+    if self.status ~= AR_ANIMATION_STATUS.PLAYING and not forceReturn then return end
 
-    self.status = AR_ANIMATION_STATUS.FINISHED
+    if self.LoopMode == AR_LOOP_MODE.NO_LOOP and not forceReturn then
+        self.status = AR_ANIMATION_STATUS.SMOOTH_RETURN
+        self.SmoothReturnStartTime = CurTime()
+    else
+        self.status = AR_ANIMATION_STATUS.FINISHED
+    end
+
     self.IsActivated = false
     -- Remove this box from the active playback boxes
     ActivePlaybackBoxes[self] = nil
@@ -209,6 +222,42 @@ function ENT:Cleanup()
 
 end
 
+function ENT:ProcessSmoothReturn()
+    local smoothReturnDuration = 0.5 -- seconds
+    local progress = (CurTime() - self.SmoothReturnStartTime) / smoothReturnDuration
+
+    if progress >= 1 then
+        self.status = AR_ANIMATION_STATUS.FINISHED
+        for entIndex, info in pairs(self.AnimationInfo or {}) do
+            local ent = Entity(entIndex)
+            if IsValid(ent) then
+                ent:SetPos(info.initialPos)
+                ent:SetAngles(info.initialAng)
+                local phys = ent:GetPhysicsObject()
+                if IsValid(phys) then
+                    phys:EnableMotion(false)
+                end
+            end
+        end
+        return
+    end
+
+    for entIndex, info in pairs(self.AnimationInfo or {}) do
+        local ent = Entity(entIndex)
+        if IsValid(ent) then
+            local startPos = ent:GetPos()
+            local startAng = ent:GetAngles()
+            local targetPos = info.initialPos
+            local targetAng = info.initialAng
+
+            local newPos = LerpVector(progress, startPos, targetPos)
+            local newAng = LerpAngle(progress, startAng, targetAng)
+
+            ent:SetPos(newPos)
+            ent:SetAngles(newAng)
+        end
+    end
+end
 
 function ENT:StartPlayback()
     ARLog("StartPlayback called")
@@ -231,6 +280,7 @@ function ENT:StartPlayback()
     self.LastFrameTime = CurTime()
     self.status = AR_ANIMATION_STATUS.PLAYING
     self.PlaybackDirection = AR_PLAYBACK_DIRECTION.FORWARD
+    self.IsOneTimeSmoothReturn = false
     self.IsActivated = true
 
     -- Add this box to the active playback boxes
@@ -334,10 +384,15 @@ function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
             elseif self.LoopMode == AR_LOOP_MODE.PING_PONG then
                 --ARLog("Ping pong mode, reversing direction")
                 self.PlaybackDirection = self.PlaybackDirection * (-1)
-                nextFrameIndex = frameCount
+                nextFrameIndex = frameCount - 1
             elseif self.LoopMode == AR_LOOP_MODE.LOOP then
                 ARLog("Loop mode, resetting to start")
                 nextFrameIndex = 1
+            elseif self.LoopMode == AR_LOOP_MODE.NO_LOOP_SMOOTH then
+                --ARLog("No Loop Smooth mode, reversing direction for one-time return")
+                self.PlaybackDirection = self.PlaybackDirection * (-1)
+                self.IsOneTimeSmoothReturn = true
+                nextFrameIndex = frameCount - 1
             else
                 ARLog("Unsupported Loop mode in advanceFrames")
             end
@@ -355,12 +410,13 @@ function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
             elseif self.LoopMode == AR_LOOP_MODE.PING_PONG then
                 --ARLog("Ping pong mode, reversing direction")
                 self.PlaybackDirection = self.PlaybackDirection * (-1)
-                nextFrameIndex = 1
+                nextFrameIndex = 2
             elseif self.LoopMode == AR_LOOP_MODE.LOOP then
                 --ARLog("Loop mode, resetting to end")
                 nextFrameIndex = frameCount
-            else
-                ARLog("Unsupported Loop mode in advanceFrames")
+            elseif self.LoopMode == AR_LOOP_MODE.NO_LOOP_SMOOTH and self.IsOneTimeSmoothReturn then
+                --ARLog("No Loop Smooth mode, finished one-time return")
+                return -1 -- Animation finished
             end
         end
     end
@@ -373,8 +429,7 @@ function ENT:GetSpeed(currentFrameIndex, frameCount)
     ARLog("GetSpeed called - Easing: " .. tostring(self.Easing) .. ", Frame: " .. currentFrameIndex .. "/" .. frameCount)
     -- Calculate progress for THIS specific entity (0 to 1)
     local progress = currentFrameIndex / frameCount
-    local minSpeed = 0.1
-    local speed = minSpeed
+    local speed = 0
     if not self.Easing then
         --ARLog("Using no easing, returning base speed: " .. self.PlaybackSpeed)
         return self.PlaybackSpeed
@@ -384,13 +439,10 @@ function ENT:GetSpeed(currentFrameIndex, frameCount)
         ARLog("Easing function not found ", self.Easing)
         speed = self.PlaybackSpeed
     else
-        local y = easing_func(progress)
+        local y = easing_func(progress, self.EasingAmplitude, self.EasingFrequency, self.EasingInvert, self.EasingOffset)
         speed = self.PlaybackSpeed * y
         ARLog("Easing function value for , is and speed ", progress, y, speed)
     end
-   if speed < minSpeed then
-        speed = minSpeed
-   end
         
    --ARLog("Easing calculation - Current: " .. speed)
    return speed
@@ -402,29 +454,23 @@ function ENT:calculateNextFrame(currentFrameIndex, framesCount, lastMoveTime)
     --ARLog("calculateNextFrame: speed=" .. speed .. ", currentFrame=" .. currentFrameIndex .. ", totalFrames=" .. framesCount)
     if (speed == 0) then
         ARLog("Speed is zero for ") -- TODO add the box id in the message
-        return 1 -- move object at first frame if he set speed to 0
+        return currentFrameIndex -- Keep the current frame if speed is zero
     end
-    local moveTimeInterval = GLOBAL_TIMER_INTERVAL / math.abs(speed) --dividing with a num less then 1 will increase the numerator
 
+    local moveTimeInterval = GLOBAL_TIMER_INTERVAL / math.abs(speed)
     local now = CurTime()
     local timeSinceLastMove = now - lastMoveTime
-    -- if speed is small we might not need to move to next frame
-    if (math.abs(speed) < 1) then
-        ARLog("speed < 1: " .. speed .. ", timeSinceLastMove: " .. timeSinceLastMove .. ", moveTimeInterval: " .. moveTimeInterval)
-        if timeSinceLastMove < moveTimeInterval then
-            -- Return decimal frame index for smooth interpolation
-            local progress = timeSinceLastMove / moveTimeInterval
-            local decimalFrameIndex = currentFrameIndex + progress
-            ARLog("returning decimal frame index " .. decimalFrameIndex)
-            return decimalFrameIndex
-        else -- we need to advance 1 frame
-           --ARLog("advancing 1 frame from " .. currentFrameIndex)
-           return self:advanceFrames(1, framesCount, currentFrameIndex)
-        end
-    else --case speed is greate then 1 in abs value
-        local framesToMove = math.floor(timeSinceLastMove / moveTimeInterval)
-        return self:advanceFrames(framesToMove, framesCount, currentFrameIndex)
+
+    if timeSinceLastMove < moveTimeInterval then
+        return currentFrameIndex -- Not enough time has passed to advance to the next frame
     end
+
+    local framesToMove = math.floor(timeSinceLastMove / moveTimeInterval)
+    if framesToMove == 0 then
+        framesToMove = 1 -- Ensure at least one frame is advanced
+    end
+
+    return self:advanceFrames(framesToMove, framesCount, currentFrameIndex)
 end
 
 function ENT:SetupEntityPlayback(entIndex)
@@ -439,10 +485,7 @@ function ENT:SetupEntityPlayback(entIndex)
     local frameCount = info.frameCount
     if frameCount == 0 then return end
 
-    local freezeOnEnd = self:GetNWBool("FreezeOnEnd", false)
-    if not (freezeOnEnd and (self.LoopMode == AR_LOOP_MODE.NO_LOOP or self.LoopMode == AR_LOOP_MODE.NO_LOOP_SMOOTH)) then
-        phys:EnableMotion(true)
-    end
+    phys:EnableMotion(true)
 
     ent:SetCollisionGroup(COLLISION_GROUP_NONE)
 
@@ -466,7 +509,7 @@ function ENT:SetupEntityPlayback(entIndex)
         ARLog("Entity " .. entIndex .. " target pos set to: " .. tostring(ent.TargetPos))
         
         -- Immediately apply the first frame position
-        self:ApplyFrameData(ent, frames[i], basePos)
+        self:ApplyFrameData(ent, frames[i], basePos, true)
     else
         ent.TargetPos = ent:GetPos()
         ent.TargetAng = ent:GetAngles()
@@ -480,57 +523,13 @@ function ENT:calculateDirection()
     return (self.PlaybackDirection * (self.PlaybackSpeed < 0 and -1 or 1))
 end
 
-function interpolateFrame(frames, decimalIndex, direction)
-    if math.floor(decimalIndex) == decimalIndex then
-        return frames[decimalIndex]
-    end
-    
-    local frameIndex = math.floor(math.abs(decimalIndex))
-    local alpha = decimalIndex - frameIndex
-    
-    -- Get current and next frame indices based on direction
-    local currentFrameIndex = frameIndex
-    local nextFrameIndex
-    
-    if direction > 0 then
-        nextFrameIndex = math.min(frameIndex + 1, #frames)
-    else
-        nextFrameIndex = math.max(frameIndex - 1, 1)
-    end
-    
-    local currentFrame = frames[currentFrameIndex]
-    local nextFrame = frames[nextFrameIndex]
-    
-    if not currentFrame or not nextFrame then
-        return currentFrame or nextFrame
-    end
-    
-    -- Clone current frame
-    local interpolatedFrame = table.Copy(currentFrame)
-    
-    -- Interpolate position
-    if currentFrame.pos and nextFrame.pos then
-        interpolatedFrame.pos = LerpVector(alpha, currentFrame.pos, nextFrame.pos)
-    end
-    
-    -- Interpolate angles
-    if currentFrame.ang and nextFrame.ang then
-        interpolatedFrame.ang = LerpAngle(alpha, currentFrame.ang, nextFrame.ang)
-    end
-    
-    -- Interpolate color if present
-    if currentFrame.color and nextFrame.color then
-        interpolatedFrame.color = Color(
-            Lerp(alpha, currentFrame.color.r, nextFrame.color.r),
-            Lerp(alpha, currentFrame.color.g, nextFrame.color.g),
-            Lerp(alpha, currentFrame.color.b, nextFrame.color.b),
-            Lerp(alpha, currentFrame.color.a, nextFrame.color.a)
-        )
-    end
-    
-    return interpolatedFrame
-end
+
 function ENT:ProcessPlayback()
+    if self.status == AR_ANIMATION_STATUS.SMOOTH_RETURN then
+        self:ProcessSmoothReturn()
+        return
+    end
+
     if self.status ~= AR_ANIMATION_STATUS.PLAYING then
         ARLog("Wrong status in process playback: ", self.status)
     return end
@@ -577,15 +576,7 @@ function ENT:ProcessPlayback()
          end
 
         -- Calculate the base position and handle decimal frame indices
-        local frame
-        if math.floor(frameIndex) == frameIndex then
-            -- Whole number frame index
-            frame = frames[frameIndex]
-        else
-            -- Decimal frame index - use interpolation
-            local direction = self:calculateDirection()
-            frame = interpolateFrame(frames, frameIndex, direction)
-        end
+        local frame = frames[frameIndex]
         
         if frame then
             local basePos = Vector(0,0,0)
@@ -595,7 +586,7 @@ function ENT:ProcessPlayback()
                 end
             end
 
-            self:ApplyFrameData(ent, frame, basePos)
+            self:ApplyFrameData(ent, frame, basePos, false)
             info.LastMoveTime = now
         end
         info.currentFrameIndex = frameIndex
@@ -604,15 +595,21 @@ function ENT:ProcessPlayback()
     self.LastFrameTime = now
 end
 
-function ENT:ApplyFrameData(ent, frame, basePos)
+function ENT:ApplyFrameData(ent, frame, basePos, teleport)
     -- Apply position and angle changes
     if frame.pos and frame.ang then
         local targetPos = frame.pos + basePos
         local targetAng = frame.ang
 
-        -- Move the entity directly
         local phys = ent:GetPhysicsObject()
-        if IsValid(phys) then
+        if not IsValid(phys) then
+            ent:SetPos(targetPos)
+            ent:SetAngles(targetAng)
+        elseif teleport then
+            ent:SetPos(targetPos)
+            ent:SetAngles(targetAng)
+            phys:Wake()
+        else
             local params = {
                 pos = targetPos,
                 angle = targetAng,
@@ -626,10 +623,6 @@ function ENT:ApplyFrameData(ent, frame, basePos)
             }
             phys:Wake()
             phys:ComputeShadowControl(params)
-        else
-            -- Fallback for entities without physics
-            ent:SetPos(targetPos)
-            ent:SetAngles(targetAng)
         end
     else
         ARLog("ApplyFrameData NO pos OR angle", frame.pos, frame.ang)
@@ -649,21 +642,127 @@ function ENT:ApplyFrameData(ent, frame, basePos)
 end
 
 if CLIENT then
+    function ENT:Initialize()
+    end
+
+    function ENT:OnRemove()
+    end
+
     function ENT:Draw()
         self:DrawModel()
-        local id = self:GetNWString("BoxID", self.BoxID or "")
-        local ownerName = self:GetNWString("OwnerName", "Unknown")
-        if id ~= "" and LocalPlayer():GetPos():DistToSqr(self:GetPos()) < 300*300 then
-            local pos = self:GetPos() + Vector(0,0,40)
-            local ang = Angle(0, LocalPlayer():EyeAngles().y - 90, 90)
-            cam.Start3D2D(pos, ang, 0.2)
-                draw.RoundedBox(8, -100, -45, 200, 70, Color(255, 255, 150, 230))
-                draw.SimpleText(id, "DermaLarge", 0, -10, Color(0,0,0,255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-                draw.SimpleTextOutlined("(" .. ownerName .. ")", "DermaDefault", 0, 10, Color(0,255,0,200), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER, 2, Color(0,0,0,180))
-            cam.End3D2D()
-        end
+
+        local id = self:GetNWString("BoxID", "") or ""
+        local ownerName = self:GetNWString("OwnerName", "Unknown") or "Unknown"
+
+        if not IsValid(LocalPlayer()) or not self:GetPos() then return end
+        local distSqr = LocalPlayer():GetPos():DistToSqr(self:GetPos())
+        if id == "" or distSqr > (300 * 300) then return end
+
+        local pos = self:GetPos() + Vector(0, 0, 40)
+        local ang = Angle(0, LocalPlayer():EyeAngles().y - 90, 90)
+
+        cam.Start3D2D(pos, ang, 0.2)
+            local useRainbow = self:GetNWBool("LabelRainbow", false)
+            local backgroundColor
+            if useRainbow then
+                local hue = (CurTime() * 100) % 360
+                backgroundColor = HSVToColor(hue, 1, 1)
+                backgroundColor.a = self:GetNWInt("LabelColorA", 255)
+            else
+                local r = self:GetNWInt("LabelColorR", 255)
+                local g = self:GetNWInt("LabelColorG", 255)
+                local b = self:GetNWInt("LabelColorB", 255)
+                local a = self:GetNWInt("LabelColorA", 255)
+                backgroundColor = Color(r, g, b, a)
+            end
+
+            local fontID = "DermaLarge"
+            local paddingX = 25
+            surface.SetFont(fontID)
+            local idTextWidth = surface.GetTextSize(id)
+            local boxWidth = math.max(200, idTextWidth + paddingX * 2)
+            local boxHeight = 70
+
+            draw.RoundedBox(8, -boxWidth / 2, -boxHeight / 2, boxWidth, boxHeight, backgroundColor)
+
+            local iconSize = 32
+            local iconX = -boxWidth / 2 + 10
+            local iconY = -iconSize / 2 - 10
+
+            local boxIconPath = "icon16/box.png"
+            local boxMat = Material(boxIconPath)
+            if boxMat and not boxMat:IsError() then
+                surface.SetDrawColor(255, 255, 255, 255)
+                surface.SetMaterial(boxMat)
+                surface.DrawTexturedRect(iconX, iconY, iconSize, iconSize)
+            end
+
+            local textStartX = iconX + iconSize + 10
+            draw.SimpleText(id, fontID, textStartX, -10, Color(0, 0, 0, 255), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+
+            local AR_LOOP_MODE = {
+                NO_LOOP = 0,
+                LOOP = 1,
+                PING_PONG = 2,
+                NO_LOOP_SMOOTH = 3,
+            }
+
+            local loopMode = self:GetNWInt("LoopMode", AR_LOOP_MODE.NO_LOOP)
+
+            local loopIconPath = "icon16/box.png"
+
+            if loopMode == AR_LOOP_MODE.NO_LOOP then
+                loopIconPath = "icon16/arrow_right.png"
+            elseif loopMode == AR_LOOP_MODE.LOOP then
+                loopIconPath = "icon16/arrow_refresh.png"
+            elseif loopMode == AR_LOOP_MODE.PING_PONG then
+                loopIconPath = "icon16/arrow_rotate_clockwise.png"
+            elseif loopMode == AR_LOOP_MODE.NO_LOOP_SMOOTH then
+                loopIconPath = "icon16/arrow_redo.png"
+            end
+
+            local loopMat = Material(loopIconPath)
+            if loopMat and not loopMat:IsError() then
+                local loopIconSize = 32
+                local loopIconX = iconX
+                local loopIconY = iconY + iconSize + -3
+
+                surface.SetDrawColor(255, 255, 255, 255)
+                surface.SetMaterial(loopMat)
+                surface.DrawTexturedRect(loopIconX, loopIconY, loopIconSize, loopIconSize)
+            end
+
+            local fontOwner = "DermaDefault"
+            surface.SetFont(fontOwner)
+            local ownerText = "(" .. ownerName .. ")"
+            local ownerTextWidth = surface.GetTextSize(ownerText)
+            local ownerX = 0
+            local ownerY = 20
+
+            draw.SimpleTextOutlined(ownerText, fontOwner, ownerX, ownerY, Color(0, 255, 0, 200), TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP, 2, Color(0, 0, 0, 180))
+
+            local userMat = Material("icon16/user.png")
+            local avatarSize = 24
+            local avatarX = ownerX + (ownerTextWidth / 2) + 5
+            local avatarY = ownerY - avatarSize / 2 + 5
+
+            surface.SetDrawColor(255, 255, 255, 255)
+            surface.SetMaterial(userMat)
+            surface.DrawTexturedRect(avatarX, avatarY, avatarSize, avatarSize)
+
+        cam.End3D2D()
     end
 end
+
+
+
+
+
+
+
+
+
+
 
 
 if SERVER then
