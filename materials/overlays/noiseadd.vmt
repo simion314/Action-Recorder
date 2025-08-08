@@ -1,8 +1,8 @@
 "UnlitGeneric"
 {
 	"$baseTexture" "overlays/noiseadd"
-	"$translucent" "1"
-	"$alpha" "0.1"
+	"$additive" "1"
+	"$alpha" "0.30"
 	"$vertexalpha" "1"
 	"$ignorez"     "1"
 	"$no_fullbright" "1"

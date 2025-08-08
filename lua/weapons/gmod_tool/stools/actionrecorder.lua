@@ -320,7 +320,7 @@ function TOOL:RightClick(trace)
         boxid = ply:GetInfo("actionrecorder_boxid") or "Box"
         key = ply:GetInfoNum("actionrecorder_key", 5)
         soundpath = ply:GetInfo("actionrecorder_soundpath")
-        easing = ply:GetInfo("actionrecorder_easing") or "Linear"
+        easing = ply:GetInfo("actionrecorder_easing") or "None"
         easing_amplitude = ply:GetInfoNum("actionrecorder_easing_amplitude", 1)
         easing_frequency = ply:GetInfoNum("actionrecorder_easing_frequency", 1)
         easing_invert = ply:GetInfoNum("actionrecorder_easing_invert", 0) == 1
@@ -575,6 +575,7 @@ function TOOL.BuildCPanel(panel)
 	
 	local colorPickerButton = vgui.Create("DButton", generalSettingsForm)
     colorPickerButton:SetText("Change Label Color")
+    colorPickerButton:SetImage("icon16/color_wheel.png")
     colorPickerButton:SetToolTip("Open color palette to change label color")
     colorPickerButton:SetTall(25)
     colorPickerButton.DoClick = function()

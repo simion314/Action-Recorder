@@ -23,7 +23,7 @@ function ENT:Initialize()
     self.LoopMode = AR_LOOP_MODE.NO_LOOP
     self.PlaybackDirection = AR_PLAYBACK_DIRECTION.FORWARD
     self.PlaybackType = AR_PLAYBACK_TYPE.ABSOLUTE
-    self.Easing = "Linear"
+    self.Easing = "None"
     self.EasingAmplitude = 1
     self.EasingFrequency = 1
     self.EasingInvert = false
