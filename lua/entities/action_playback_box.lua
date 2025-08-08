@@ -118,7 +118,13 @@ function ENT:SetPlaybackSettings(speed, loopMode, playbackType, easing, easing_a
     self.EasingFrequency = easing_frequency or 1
     self.EasingInvert = easing_invert or false
     self.EasingOffset = easing_offset or 0
+
+    if SERVER then
+        
+        self:SetNWInt("LoopMode", self.LoopMode)
+    end
 end
+
 
 function ENT:SetBoxID(id)
     self.BoxID = id or "Box"
@@ -154,6 +160,7 @@ function ENT:UpdateSettings(
     self:SetSoundPath(soundpath)
     self:SetPhysicslessTeleport(physicsless)
     self:SetNWBool("FreezeOnEnd", freezeonend)
+	self:SetNWInt("LoopMode", loopMode or 0)
     self:SetupNumpad()
     self:StartPlayback()
 end
@@ -635,21 +642,26 @@ function ENT:ApplyFrameData(ent, frame, basePos, teleport)
 end
 
 if CLIENT then
+    function ENT:Initialize()
+    end
+
+    function ENT:OnRemove()
+    end
+
     function ENT:Draw()
         self:DrawModel()
 
         local id = self:GetNWString("BoxID", "") or ""
         local ownerName = self:GetNWString("OwnerName", "Unknown") or "Unknown"
-        local distSqr = LocalPlayer():GetPos():DistToSqr(self:GetPos())
 
-        
+        if not IsValid(LocalPlayer()) or not self:GetPos() then return end
+        local distSqr = LocalPlayer():GetPos():DistToSqr(self:GetPos())
         if id == "" or distSqr > (300 * 300) then return end
 
-        local pos = self:GetPos() + Vector(0, 0, 40) 
-        local ang = Angle(0, LocalPlayer():EyeAngles().y - 90, 90) 
+        local pos = self:GetPos() + Vector(0, 0, 40)
+        local ang = Angle(0, LocalPlayer():EyeAngles().y - 90, 90)
 
         cam.Start3D2D(pos, ang, 0.2)
-            
             local useRainbow = self:GetNWBool("LabelRainbow", false)
             local backgroundColor
             if useRainbow then
@@ -661,29 +673,96 @@ if CLIENT then
                 local g = self:GetNWInt("LabelColorG", 255)
                 local b = self:GetNWInt("LabelColorB", 255)
                 local a = self:GetNWInt("LabelColorA", 255)
-                backgroundColor = Color(r, g, b, a) --Where a is transparency
+                backgroundColor = Color(r, g, b, a)
             end
 
-            local labelColor = Color(0, 0, 0, 255)
+            local fontID = "DermaLarge"
+            local paddingX = 25
+            surface.SetFont(fontID)
+            local idTextWidth = surface.GetTextSize(id)
+            local boxWidth = math.max(200, idTextWidth + paddingX * 2)
+            local boxHeight = 70
 
-            
-            draw.RoundedBox(8, -100, -45, 200, 70, backgroundColor)
+            draw.RoundedBox(8, -boxWidth / 2, -boxHeight / 2, boxWidth, boxHeight, backgroundColor)
 
-            
-            local iconPath = self.CustomIconPath or "icon16/box.png"
+            local iconSize = 32
+            local iconX = -boxWidth / 2 + 10
+            local iconY = -iconSize / 2 - 10
+
+            local boxIconPath = "icon16/box.png"
+            local boxMat = Material(boxIconPath)
+            if boxMat and not boxMat:IsError() then
+                surface.SetDrawColor(255, 255, 255, 255)
+                surface.SetMaterial(boxMat)
+                surface.DrawTexturedRect(iconX, iconY, iconSize, iconSize)
+            end
+
+            local textStartX = iconX + iconSize + 10
+            draw.SimpleText(id, fontID, textStartX, -10, Color(0, 0, 0, 255), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+
+            local AR_LOOP_MODE = {
+                NO_LOOP = 0,
+                LOOP = 1,
+                PING_PONG = 2,
+                NO_LOOP_SMOOTH = 3,
+            }
+
+            local loopMode = self:GetNWInt("LoopMode", AR_LOOP_MODE.NO_LOOP)
+
+            local loopIconPath = "icon16/box.png"
+
+            if loopMode == AR_LOOP_MODE.NO_LOOP then
+                loopIconPath = "icon16/arrow_right.png"
+            elseif loopMode == AR_LOOP_MODE.LOOP then
+                loopIconPath = "icon16/arrow_refresh.png"
+            elseif loopMode == AR_LOOP_MODE.PING_PONG then
+                loopIconPath = "icon16/arrow_rotate_clockwise.png"
+            elseif loopMode == AR_LOOP_MODE.NO_LOOP_SMOOTH then
+                loopIconPath = "icon16/arrow_redo.png"
+            end
+
+            local loopMat = Material(loopIconPath)
+            if loopMat and not loopMat:IsError() then
+                local loopIconSize = 32
+                local loopIconX = iconX
+                local loopIconY = iconY + iconSize + -3
+
+                surface.SetDrawColor(255, 255, 255, 255)
+                surface.SetMaterial(loopMat)
+                surface.DrawTexturedRect(loopIconX, loopIconY, loopIconSize, loopIconSize)
+            end
+
+            local fontOwner = "DermaDefault"
+            surface.SetFont(fontOwner)
+            local ownerText = "(" .. ownerName .. ")"
+            local ownerTextWidth = surface.GetTextSize(ownerText)
+            local ownerX = 0
+            local ownerY = 20
+
+            draw.SimpleTextOutlined(ownerText, fontOwner, ownerX, ownerY, Color(0, 255, 0, 200), TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP, 2, Color(0, 0, 0, 180))
+
+            local userMat = Material("icon16/user.png")
+            local avatarSize = 24
+            local avatarX = ownerX + (ownerTextWidth / 2) + 5
+            local avatarY = ownerY - avatarSize / 2 + 5
+
             surface.SetDrawColor(255, 255, 255, 255)
-            surface.SetMaterial(Material(iconPath))
-            surface.DrawTexturedRect(-90, -40, 32, 32)
+            surface.SetMaterial(userMat)
+            surface.DrawTexturedRect(avatarX, avatarY, avatarSize, avatarSize)
 
-            
-            draw.SimpleText(id, "DermaLarge", 0, -10, Color(0,0,0,255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-
-            
-            draw.SimpleTextOutlined("(" .. ownerName .. ")", "DermaDefault", 0, 10, Color(0, 255, 0, 200),
-                TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER, 2, Color(0, 0, 0, 180))
         cam.End3D2D()
     end
 end
+
+
+
+
+
+
+
+
+
+
 
 
 if SERVER then

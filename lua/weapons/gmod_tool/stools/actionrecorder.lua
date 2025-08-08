@@ -549,7 +549,7 @@ function TOOL.BuildCPanel(panel)
     generalSettingsForm:DockMargin(0, 2, 0, 2)
     panel:AddItem(generalSettingsForm)
     colorHeader(generalSettingsForm, color_red)
-    generalSettingsForm:NumSlider("Playback Speed", "actionrecorder_playbackspeed", -50, 50, 2):SetDecimals(2)
+    generalSettingsForm:NumSlider("Playback Speed", "actionrecorder_playbackspeed", 0, 50, 2):SetDecimals(2)
     local loop_combo = generalSettingsForm:ComboBox("Loop Mode", "actionrecorder_loop")
     loop_combo:AddChoice("No Loop", 0, true)
     loop_combo:AddChoice("Loop", 1)
@@ -712,22 +712,22 @@ if CLIENT then
     
     net.Receive("ActionRecorder_PlayStartSound", function()
         if not GetConVar("ar_enable_sounds"):GetBool() then return end
-        surface.PlaySound("action_recorder/start.wav")
+        surface.PlaySound("action_recorder/start_recording.wav")
     end)
 
     net.Receive("ActionRecorder_PlayStopSound", function()
         if not GetConVar("ar_enable_sounds"):GetBool() then return end
-        surface.PlaySound("action_recorder/stop.wav")
+        surface.PlaySound("action_recorder/stop_recording.wav")
     end)
 
-    net.Receive("ActionRecorder_Notify", function()
+    net.Receive("ActionRecorderNotify", function()
         local msg = net.ReadString()
         local typ = net.ReadInt(3)
         notification.AddLegacy(msg, typ, 5)
     end)
 
     local loopActive = false
-    local LOOP_FILE = "action_recorder/loop.wav"
+    local LOOP_FILE = "action_recorder/recording_loop.wav"
     local LOOP_DURATION = 1.2
 
     local function PlayLoopSound()
