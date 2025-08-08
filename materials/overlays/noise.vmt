@@ -2,7 +2,7 @@
 {
 	"$baseTexture" "overlays/noise"
 	"$translucent" "1"
-	"$alpha" "0.1"
+	"$alpha" "0.30"
 	"$vertexalpha" "1"
 	"$ignorez"     "1"
 	"$no_fullbright" "1"
