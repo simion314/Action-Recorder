@@ -480,9 +480,9 @@ function ENT:calculateNextFrame(info)
         if timeSinceLastMove < moveTimeInterval then
             -- Return decimal frame index for smooth interpolation
             local progress = timeSinceLastMove / moveTimeInterval
-            local decimalFrameIndex = currentFrameIndex + progress
-            ARLog("returning decimal frame index " .. decimalFrameIndex)
-            return decimalFrameIndex
+            --local decimalFrameIndex = currentFrameIndex + progress
+            --ARLog("returning decimal frame index " .. decimalFrameIndex)
+            return self:advanceFrames(progress, info)
         else -- we need to advance 1 frame
            --ARLog("advancing 1 frame from " .. currentFrameIndex)
            return self:advanceFrames(1, info)
