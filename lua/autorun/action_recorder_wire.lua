@@ -29,6 +29,10 @@ end
 function ActionRecorder.Wire.UpdateOutputs(ent)
     if not WireLib or not ent.WireState then return end
     
+    local now = CurTime()
+    if now - ent.WireState.outputThrottle < 0.1 then return end
+    ent.WireState.outputThrottle = now
+
     local ws = ent.WireState
     local currentFrame = ent:GetCurrentFrameIndex()
     local maxFrames = ent:GetMaxFrames()

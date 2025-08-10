@@ -32,7 +32,6 @@ function ENT:Initialize()
     self.lastStatus = AR_ANIMATION_STATUS.NOT_STARTED
     self.BoxID = "Box"
     self.NumpadKey = self.NumpadKey or 5
-    self.IsOneTimeSmoothReturn = false
     self.IsActivated = false
     self.ShouldSmoothReturn = false
     self.PhysicslessTeleport = false
@@ -93,6 +92,10 @@ function ENT:SetPlaybackData(data)
     --ARLog("SetPlaybackData length ", #data)
     self.PlaybackData = {}
     self.AnimationInfo = {}
+    local direction = AR_PLAYBACK_DIRECTION.FORWARD
+    if self.PlaybackSpeed < 0 then
+            direction = AR_PLAYBACK_DIRECTION.REVERSE
+    end
     for id,frames in pairs(data) do
         if not frames or 0 == #frames then
             ARLog("attempt to setplayback entity with zero frames skipping")
@@ -100,7 +103,7 @@ function ENT:SetPlaybackData(data)
         self.PlaybackData[id] = frames
         self.AnimationInfo[id] = {
             frameCount = #frames,
-            direction = AR_PLAYBACK_DIRECTION.FORWARD,
+            direction = direction,
             status = AR_ANIMATION_STATUS.NOT_STARTED,
             currentFrameIndex = 1,
             initialPos = nil,
@@ -153,8 +156,7 @@ function ENT:UpdateSettings(
     self:StopPlayback()
     self:SetPlaybackSettings(
         speed, loopMode, playbackType,
-        easing, easing_amplitude, easing_frequency, easing_invert, easing_offset, physicsless
-    )
+        easing, easing_amplitude, easing_frequency, easing_invert, easing_offset)
     self:SetModelPath(model)
     self:SetBoxID(boxid)
     self:SetSoundPath(soundpath)
@@ -280,7 +282,6 @@ function ENT:StartPlayback()
     self.LastFrameTime = CurTime()
     self.status = AR_ANIMATION_STATUS.PLAYING
     self.PlaybackDirection = AR_PLAYBACK_DIRECTION.FORWARD
-    self.IsOneTimeSmoothReturn = false
     self.IsActivated = true
 
     -- Add this box to the active playback boxes
@@ -288,8 +289,10 @@ function ENT:StartPlayback()
 
     for _, info in pairs(self.AnimationInfo) do
         info.status = AR_ANIMATION_STATUS.PLAYING
-        info.currentFrameIndex = 1
+        info.currentFrameIndex = self.PlaybackSpeed >= 0 and 1 or info.frameCount
+        info.direction = self.PlaybackSpeed >= 0 and self.PlaybackDirection or (-1) * self.PlaybackDirection
         info.LastMoveTime = CurTime()
+        info.IsOneTimeSmoothReturn = false
      end
     -- Create the global timer if it doesn't exist
     if not timer.Exists(GLOBAL_PLAYBACK_TIMER) then
@@ -327,7 +330,7 @@ function ENT:GetCurrentFrameIndex()
     for _, info in pairs(self.AnimationInfo or {}) do
         if info and info.currentFrameIndex then
             minFrame = math.min(minFrame, info.currentFrameIndex)
-            --ARLog("min frame is ", minFrame)f
+            --ARLog("min frame is ", minFrame)
         end
     end
     return minFrame == math.huge and 1 or minFrame
@@ -356,9 +359,10 @@ function ENT:StopPlaybackIfNeeded()
         self:StopPlayback()
     end
 end
-function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
+function ENT:advanceFrames(amount, info)
     --ARLog("advanceFrames called: amount=" .. amount .. ", frameCount=" .. frameCount .. ", currentIndex=" .. currentFrameIndex)
-
+    local currentFrameIndex = info.currentFrameIndex
+    local frameCount = info.frameCount
     if frameCount <= 1 then
         ARLog("Only one frame available, marking entity as finished.")
         return -1  -- Mark as finished to stop processing
@@ -366,7 +370,7 @@ function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
     local atStart = currentFrameIndex == 1
     local atEnd = currentFrameIndex == frameCount
     local nextFrameIndex = currentFrameIndex
-    local direction = self:calculateDirection()
+    local direction = info.direction
 
     -- Log basic information
     -- ARLog("direction:", direction, "atStart:", atStart, "atEnd:", atEnd, "frameCount:", frameCount)
@@ -380,18 +384,19 @@ function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
             --ARLog("At end, handling loop modes")
             if self.LoopMode == AR_LOOP_MODE.NO_LOOP then
                 ARLog("No loop mode, entity finished")
+                info.status = AR_ANIMATION_STATUS.FINISHED
                 return -1
             elseif self.LoopMode == AR_LOOP_MODE.PING_PONG then
                 --ARLog("Ping pong mode, reversing direction")
-                self.PlaybackDirection = self.PlaybackDirection * (-1)
+                info.direction = info.direction * (-1)
                 nextFrameIndex = frameCount - 1
             elseif self.LoopMode == AR_LOOP_MODE.LOOP then
                 ARLog("Loop mode, resetting to start")
                 nextFrameIndex = 1
             elseif self.LoopMode == AR_LOOP_MODE.NO_LOOP_SMOOTH then
                 --ARLog("No Loop Smooth mode, reversing direction for one-time return")
-                self.PlaybackDirection = self.PlaybackDirection * (-1)
-                self.IsOneTimeSmoothReturn = true
+                 info.direction = info.direction * (-1)
+                info.IsOneTimeSmoothReturn = true
                 nextFrameIndex = frameCount - 1
             else
                 ARLog("Unsupported Loop mode in advanceFrames")
@@ -406,16 +411,18 @@ function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
             --ARLog("At start, handling loop modes")
             if self.LoopMode == AR_LOOP_MODE.NO_LOOP then
                 ARLog("No loop mode, entity finished")
+                info.status = AR_ANIMATION_STATUS.FINISHED
                 return -1
             elseif self.LoopMode == AR_LOOP_MODE.PING_PONG then
                 --ARLog("Ping pong mode, reversing direction")
-                self.PlaybackDirection = self.PlaybackDirection * (-1)
+                info.direction = info.direction  * (-1)
                 nextFrameIndex = 2
             elseif self.LoopMode == AR_LOOP_MODE.LOOP then
                 --ARLog("Loop mode, resetting to end")
                 nextFrameIndex = frameCount
-            elseif self.LoopMode == AR_LOOP_MODE.NO_LOOP_SMOOTH and self.IsOneTimeSmoothReturn then
+            elseif self.LoopMode == AR_LOOP_MODE.NO_LOOP_SMOOTH and info.IsOneTimeSmoothReturn then
                 --ARLog("No Loop Smooth mode, finished one-time return")
+                info.status = AR_ANIMATION_STATUS.FINISHED
                 return -1 -- Animation finished
             end
         end
@@ -426,11 +433,12 @@ function ENT:advanceFrames(amount, frameCount, currentFrameIndex)
 end
 
 function ENT:GetSpeed(currentFrameIndex, frameCount)
-    ARLog("GetSpeed called - Easing: " .. tostring(self.Easing) .. ", Frame: " .. currentFrameIndex .. "/" .. frameCount)
+    --ARLog("GetSpeed called " , self.Easing)
     -- Calculate progress for THIS specific entity (0 to 1)
     local progress = currentFrameIndex / frameCount
-    local speed = 0
-    if not self.Easing then
+    local minSpeed = 0.1
+    local speed = minSpeed
+    if not self.Easing or self.Easing == "None" then
         --ARLog("Using no easing, returning base speed: " .. self.PlaybackSpeed)
         return self.PlaybackSpeed
     end
@@ -439,38 +447,50 @@ function ENT:GetSpeed(currentFrameIndex, frameCount)
         ARLog("Easing function not found ", self.Easing)
         speed = self.PlaybackSpeed
     else
-        local y = easing_func(progress, self.EasingAmplitude, self.EasingFrequency, self.EasingInvert, self.EasingOffset)
-        speed = self.PlaybackSpeed * y
-        ARLog("Easing function value for , is and speed ", progress, y, speed)
+       local y = easing_func(progress, self.EasingAmplitude, self.EasingFrequency, self.EasingInvert, self.EasingOffset)
+               speed = self.PlaybackSpeed * y
+        --ARLog("Easing function value for , is and speed ", progress, y, speed)
     end
-        
+   if speed < minSpeed then
+        speed = minSpeed
+   end
+
    --ARLog("Easing calculation - Current: " .. speed)
    return speed
 end
 
 
-function ENT:calculateNextFrame(currentFrameIndex, framesCount, lastMoveTime)
+function ENT:calculateNextFrame(info)
+    local currentFrameIndex = info.currentFrameIndex
+    local framesCount = info.frameCount
+    local lastMoveTime = info.LastMoveTime
     local speed = self:GetSpeed(currentFrameIndex, framesCount)
     --ARLog("calculateNextFrame: speed=" .. speed .. ", currentFrame=" .. currentFrameIndex .. ", totalFrames=" .. framesCount)
     if (speed == 0) then
         ARLog("Speed is zero for ") -- TODO add the box id in the message
-        return currentFrameIndex -- Keep the current frame if speed is zero
+        return 1 -- move object at first frame if he set speed to 0
     end
+    local moveTimeInterval = GLOBAL_TIMER_INTERVAL / math.abs(speed) --dividing with a num less then 1 will increase the numerator
 
-    local moveTimeInterval = GLOBAL_TIMER_INTERVAL / math.abs(speed)
     local now = CurTime()
     local timeSinceLastMove = now - lastMoveTime
-
-    if timeSinceLastMove < moveTimeInterval then
-        return currentFrameIndex -- Not enough time has passed to advance to the next frame
+    -- if speed is small we might not need to move to next frame
+    if (math.abs(speed) < 1) then
+        --ARLog("speed < 1: " .. speed .. ", timeSinceLastMove: " .. timeSinceLastMove .. ", moveTimeInterval: " .. moveTimeInterval)
+        if timeSinceLastMove < moveTimeInterval then
+            -- Return decimal frame index for smooth interpolation
+            local progress = timeSinceLastMove / moveTimeInterval
+            --local decimalFrameIndex = currentFrameIndex + progress
+            --ARLog("returning decimal frame index " .. decimalFrameIndex)
+            return self:advanceFrames(progress, info)
+        else -- we need to advance 1 frame
+           --ARLog("advancing 1 frame from " .. currentFrameIndex)
+           return self:advanceFrames(1, info)
+        end
+    else --case speed is greate then 1 in abs value
+        local framesToMove = math.floor(timeSinceLastMove / moveTimeInterval)
+        return self:advanceFrames(framesToMove, info)
     end
-
-    local framesToMove = math.floor(timeSinceLastMove / moveTimeInterval)
-    if framesToMove == 0 then
-        framesToMove = 1 -- Ensure at least one frame is advanced
-    end
-
-    return self:advanceFrames(framesToMove, framesCount, currentFrameIndex)
 end
 
 function ENT:SetupEntityPlayback(entIndex)
@@ -524,6 +544,56 @@ function ENT:calculateDirection()
 end
 
 
+  function interpolateFrame(frames, decimalIndex, direction)
+    if math.floor(decimalIndex) == decimalIndex then
+        return frames[decimalIndex]
+    end
+
+    local frameIndex = math.floor(math.abs(decimalIndex))
+    local alpha = decimalIndex - frameIndex
+
+    -- Get current and next frame indices based on direction
+    local currentFrameIndex = frameIndex
+    local nextFrameIndex
+
+    if direction > 0 then
+        nextFrameIndex = math.min(frameIndex + 1, #frames)
+    else
+        nextFrameIndex = math.max(frameIndex - 1, 1)
+    end
+
+    local currentFrame = frames[currentFrameIndex]
+    local nextFrame = frames[nextFrameIndex]
+
+    if not currentFrame or not nextFrame then
+        return currentFrame or nextFrame
+    end
+
+    -- Clone current frame
+    local interpolatedFrame = table.Copy(currentFrame)
+
+    -- Interpolate position
+    if currentFrame.pos and nextFrame.pos then
+        interpolatedFrame.pos = LerpVector(alpha, currentFrame.pos, nextFrame.pos)
+    end
+
+    -- Interpolate angles
+    if currentFrame.ang and nextFrame.ang then
+        interpolatedFrame.ang = LerpAngle(alpha, currentFrame.ang, nextFrame.ang)
+    end
+
+    -- Interpolate color if present
+    if currentFrame.color and nextFrame.color then
+        interpolatedFrame.color = Color(
+            Lerp(alpha, currentFrame.color.r, nextFrame.color.r),
+            Lerp(alpha, currentFrame.color.g, nextFrame.color.g),
+            Lerp(alpha, currentFrame.color.b, nextFrame.color.b),
+            Lerp(alpha, currentFrame.color.a, nextFrame.color.a)
+        )
+    end
+
+    return interpolatedFrame
+end
 function ENT:ProcessPlayback()
     if self.status == AR_ANIMATION_STATUS.SMOOTH_RETURN then
         self:ProcessSmoothReturn()
@@ -560,7 +630,7 @@ function ENT:ProcessPlayback()
             ARLog("This entity has zero frames, should not have been added ", entIndex)
             continue
          end
-         local frameIndex = self:calculateNextFrame(info.currentFrameIndex, frameCount, info.LastMoveTime)
+         local frameIndex = self:calculateNextFrame(info)
          --ARLog("Entity " .. entIndex .. " calculated frameIndex: " .. frameIndex .. " (was " .. info.currentFrameIndex .. ")")
          if (frameIndex == info.currentFrameIndex) then
             continue
@@ -568,7 +638,6 @@ function ENT:ProcessPlayback()
          
          -- Check if entity finished
          if frameIndex == -1 then
-             info.status = AR_ANIMATION_STATUS.FINISHED
              --ARLog("Entity " .. entIndex .. " marked as finished")
              -- Check if all entities are finished and stop playback if needed
              self:StopPlaybackIfNeeded()
@@ -576,8 +645,16 @@ function ENT:ProcessPlayback()
          end
 
         -- Calculate the base position and handle decimal frame indices
-        local frame = frames[frameIndex]
-        
+        local frame
+         if math.floor(frameIndex) == frameIndex then
+                    -- Whole number frame index
+                    frame = frames[frameIndex]
+         else
+                    -- Decimal frame index - use interpolation
+                    local direction = self:calculateDirection()
+                    frame = interpolateFrame(frames, frameIndex, direction)
+         end
+
         if frame then
             local basePos = Vector(0,0,0)
             if self.PlaybackType == AR_PLAYBACK_TYPE.RELATIVE and frame.pos then
@@ -800,14 +877,14 @@ function ENT:TriggerInput(iname, value)
     local handlers = {
         ["Play"] = function(val) 
             if val ~= 0 then 
-                self:StartPlayback(true) 
+                self:StartPlayback(false) 
             else 
-                self:StopPlayback(true) 
+                self:StopPlayback(false) 
             end 
         end,
         
         ["Stop"] = function(val) 
-            if val ~= 0 then self:StopPlayback(true) end 
+            if val ~= 0 then self:StopPlayback(false) end 
         end,
         
         ["PlaybackSpeed"] = function(val) 
@@ -847,19 +924,10 @@ end
 function ENT:Think()
     if not WireLib or not self.WireState then return end
     
-    local now = CurTime()
-    
-    -- Throttle wire outputs to 10Hz instead of 50Hz for better performance
-    if now - self.WireState.outputThrottle < 0.1 then
-        self:NextThink(now + 0.02)
-        return true
-    end
-    self.WireState.outputThrottle = now
-    
     -- Update wire outputs using the centralized system
     ActionRecorder.Wire.UpdateOutputs(self)
     
-    self:NextThink(now + 0.02)
+    self:NextThink(CurTime() + 0.1)
     return true
 end
 
