@@ -723,6 +723,9 @@ function ENT:ApplyFrameData(ent, frame, basePos, teleport)
             ent:Extinguish()
         end
     end
+    if frame.collisiongroup ~= nil then
+        ent:SetCollisionGroup(frame.collisiongroup)
+    end
 end
 
 if CLIENT then
