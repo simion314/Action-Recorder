@@ -138,6 +138,7 @@ local function StartPropRecording(ply, prop, boxid)
             renderfx = prop:GetRenderFX(),
             rendermode = prop:GetRenderMode(),
             skin = prop:GetSkin(),
+            ignited = prop:IsOnFire(),
             bodygroups = (function()
                 local t = {}
                 for k,v in pairs(prop:GetBodyGroups() or {}) do
@@ -152,6 +153,7 @@ local function StartPropRecording(ply, prop, boxid)
             or last.material ~= cur.material
             or last.skin ~= cur.skin
             or last.rendermode ~= cur.rendermode
+            or last.ignited ~= cur.ignited
             or last.renderfx ~= cur.renderfx then
             changed = true
         elseif last.color and cur.color and (last.color.r ~= cur.color.r or last.color.g ~= cur.color.g or last.color.b ~= cur.color.b or last.color.a ~= cur.color.a) then

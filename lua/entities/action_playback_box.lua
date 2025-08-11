@@ -716,6 +716,13 @@ function ENT:ApplyFrameData(ent, frame, basePos, teleport)
             ent:SetBodygroup(id, val)
         end
     end
+    if frame.ignited ~= nil then
+        if frame.ignited then
+            ent:Ignite(30, 0)
+        else
+            ent:Extinguish()
+        end
+    end
 end
 
 if CLIENT then
