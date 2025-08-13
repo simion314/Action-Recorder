@@ -99,7 +99,8 @@ function ENT:SetPlaybackData(data)
             currentFrameIndex = 1,
             initialPos = nil,
             initialAng = nil,
-            model = Entity(id):GetModel()
+            model = Entity(id):GetModel(),
+            class = Entity(id):GetClass()
         }
     end
 
@@ -592,8 +593,9 @@ function ENT:ProcessPlayback()
         local currentEntIndex = entIndex
 
         if not IsValid(ent) then
-            ent = ents.Create("prop_physics")
             local model = self.AnimationInfo[entIndex].model
+            local class = self.AnimationInfo[entIndex].class
+            ent = ents.Create(class)
             ent:SetModel(model)
             ent:SetPos(frames[1].pos)
             ent:Spawn()
