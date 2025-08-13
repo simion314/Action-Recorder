@@ -98,7 +98,9 @@ function ENT:SetPlaybackData(data)
             status = AR_ANIMATION_STATUS.NOT_STARTED,
             currentFrameIndex = 1,
             initialPos = nil,
-            initialAng = nil
+            initialAng = nil,
+            model = Entity(id):GetModel(),
+            class = Entity(id):GetClass()
         }
     end
 
@@ -545,6 +547,25 @@ function interpolateFrame(frames, decimalIndex, direction)
     return interpolatedFrame
 end
 
+function changeKey(oldKey, newKey, targetTable)
+    if oldKey == newKey then return end -- Do nothing if keys are the same
+    -- Check if the old key exists in the table.
+    -- If it doesn't, there's nothing to change.
+    if targetTable[oldKey] ~= nil then
+        -- 1. Get the value from the old key.
+        local valueToMove = targetTable[oldKey]
+
+        -- 2. Assign that value to the new key.
+        targetTable[newKey] = valueToMove
+
+        -- 3. Remove the old key.
+        targetTable[oldKey] = nil
+    else
+        -- Optionally, you can add an error message or
+        -- a print statement to indicate the key wasn't found.
+        print("Error: The old key '" .. tostring(oldKey) .. "' does not exist in the table.")
+    end
+end
 function ENT:ProcessPlayback()
     if self.status == AR_ANIMATION_STATUS.SMOOTH_RETURN then
         self:ProcessSmoothReturn()
@@ -552,50 +573,68 @@ function ENT:ProcessPlayback()
     end
 
     if self.status ~= AR_ANIMATION_STATUS.PLAYING then
-        ARLog("Wrong status in process playback: ", self.status)
         return
     end
 
-    local freezeOnEnd = self:GetNWBool("FreezeOnEnd", false)
     local now = CurTime()
-    --ARLog("ProcessPlayback: Processing ", table.Count(self.PlaybackData or {}), " entities")
-    for entIndex, frames in pairs(self.PlaybackData or {}) do
+
+    local entityKeys = {}
+    for k in pairs(self.PlaybackData or {}) do
+        table.insert(entityKeys, k)
+    end
+
+    for _, entIndex in ipairs(entityKeys) do
+        if not self.PlaybackData[entIndex] then
+            continue
+        end
+
+        local frames = self.PlaybackData[entIndex]
         local ent = Entity(entIndex)
-        if not IsValid(ent) then continue end
+        local currentEntIndex = entIndex
+
+        if not IsValid(ent) then
+            local model = self.AnimationInfo[entIndex].model
+            local class = self.AnimationInfo[entIndex].class
+            ent = ents.Create(class)
+            ent:SetModel(model)
+            ent:SetPos(frames[1].pos)
+            ent:Spawn()
+            local newEntId = ent:EntIndex()
+            
+            changeKey(entIndex, newEntId, self.AnimationInfo)
+            changeKey(entIndex, newEntId, self.PlaybackData)
+            currentEntIndex = newEntId
+            frames = self.PlaybackData[currentEntIndex]
+        end
+
         local phys = ent:GetPhysicsObject()
         if not IsValid(phys) then continue end
-        local info = self.AnimationInfo[entIndex]
-        -- Skip entities that are already finished
+
+        local info = self.AnimationInfo[currentEntIndex]
+        if not info then
+            continue
+        end
+
         if info.status == AR_ANIMATION_STATUS.FINISHED then
-            --ARLog("Skipping finished entity: ", entIndex)
             continue
         end
 
         local frameCount = info.frameCount
-        --ARLog("Entity ", entIndex, " frameCount: ", frameCount, " currentFrame: ", info.currentFrameIndex)
         if frameCount == 0 then
-            ARLog("This entity has zero frames, should not have been added ", entIndex)
             continue
         end
 
         local frameIndex = self:calculateNextFrame(info)
-        --ARLog("Entity " .. entIndex .. " calculated frameIndex: " .. frameIndex .. " (was " .. info.currentFrameIndex .. ")")
         if frameIndex == info.currentFrameIndex then continue end
-        -- Check if entity finished
         if frameIndex == -1 then
-            --ARLog("Entity " .. entIndex .. " marked as finished")
-            -- Check if all entities are finished and stop playback if needed
             self:StopPlaybackIfNeeded()
             continue
         end
 
-        -- Calculate the base position and handle decimal frame indices
         local frame
         if math.floor(frameIndex) == frameIndex then
-            -- Whole number frame index
             frame = frames[frameIndex]
         else
-            -- Decimal frame index - use interpolation
             local direction = self:calculateDirection()
             frame = interpolateFrame(frames, frameIndex, direction)
         end
@@ -610,7 +649,6 @@ function ENT:ProcessPlayback()
         info.currentFrameIndex = frameIndex
     end
 
-    --end for
     self.LastFrameTime = now
 end
 
