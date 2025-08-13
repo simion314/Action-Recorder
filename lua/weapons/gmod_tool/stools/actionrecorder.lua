@@ -27,6 +27,7 @@ if SERVER then
 	CreateConVar("actionrecorder_labelcolor_b", "255", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
     CreateConVar("actionrecorder_labelcolor_a", "255", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
 	CreateConVar("actionrecorder_labelcolor_rainbow", "0", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
+	CreateConVar("actionrecorder_reverseplayback", "0", { FCVAR_ARCHIVE, FCVAR_REPLICATED })
 else
     CreateClientConVar("actionrecorder_playbackspeed", "1", true, true)
     CreateClientConVar("actionrecorder_loop", "0", true, true)
@@ -47,6 +48,7 @@ else
     CreateClientConVar("actionrecorder_labelcolor_b", "255", true, false)
     CreateClientConVar("actionrecorder_labelcolor_a", "255", true, false)
 	CreateClientConVar("actionrecorder_labelcolor_rainbow", "0", true, false)
+	CreateClientConVar("actionrecorder_reverseplayback", "0", true, true)
 end
 
 if SERVER then
@@ -298,8 +300,10 @@ function TOOL:RightClick(trace)
     local easing, easing_amplitude, easing_frequency, easing_invert, easing_offset
     local physicsless, freezeonend
     local label_r, label_g, label_b, label_a, label_rainbow
+    local reversePlayback
 
     
+    -- Get settings based on global mode or player settings
     if globalMode and ply:IsAdmin() then
         speed = tonumber(GetConVar("actionrecorder_playbackspeed"):GetString()) or 1
         loop = GetConVar("actionrecorder_loop"):GetInt()
@@ -315,6 +319,7 @@ function TOOL:RightClick(trace)
         easing_offset = GetConVar("actionrecorder_easing_offset"):GetFloat()
         physicsless = GetConVar("ar_physicsless_teleport"):GetBool()
         freezeonend = GetConVar("actionrecorder_freezeonend"):GetBool()
+        reversePlayback = GetConVar("actionrecorder_reverseplayback"):GetBool()
         
     else
         speed = ply:GetInfoNum("actionrecorder_playbackspeed", 1)
@@ -331,6 +336,7 @@ function TOOL:RightClick(trace)
         easing_offset = ply:GetInfoNum("actionrecorder_easing_offset", 0)
         physicsless = ply:GetInfoNum("ar_physicsless_teleport", 0) == 1
         freezeonend = ply:GetInfoNum("actionrecorder_freezeonend", 0) == 1
+        reversePlayback = ply:GetInfoNum("actionrecorder_reverseplayback", 0) == 1
         
     end
 
@@ -376,7 +382,7 @@ function TOOL:RightClick(trace)
         found_box_owned:UpdateSettings(
             speed, loop, playbackType, model, boxid, soundpath,
             easing, easing_amplitude, easing_frequency, easing_invert, easing_offset,
-            physicsless, freezeonend
+            physicsless, freezeonend, reversePlayback
         )
         found_box_owned.NumpadKey = key
         found_box_owned:SetPhysicslessTeleport(physicsless)
@@ -416,7 +422,7 @@ function TOOL:RightClick(trace)
     ent:SetPlaybackData(ply.ActionRecordData)
     ent:SetPlaybackSettings(
         speed, loop, playbackType,
-        easing, easing_amplitude, easing_frequency, easing_invert, easing_offset, physicsless, freezeonend
+        easing, easing_amplitude, easing_frequency, easing_invert, easing_offset, physicsless, freezeonend, reversePlayback
     )
     ent:SetModelPath(model)
     ent:SetBoxID(boxid)
@@ -554,6 +560,7 @@ function TOOL.BuildCPanel(panel)
     panel:AddItem(generalSettingsForm)
     colorHeader(generalSettingsForm, color_red)
     generalSettingsForm:NumSlider("Playback Speed", "actionrecorder_playbackspeed", 0, 50, 2):SetDecimals(2)
+    generalSettingsForm:CheckBox("Reverse Playback", "actionrecorder_reverseplayback")
     local loop_combo = generalSettingsForm:ComboBox("Loop Mode", "actionrecorder_loop")
     loop_combo:AddChoice("No Loop", 0, true)
     loop_combo:AddChoice("Loop", 1)
@@ -678,6 +685,7 @@ function TOOL:GetSetConVars(ply)
 		"actionrecorder_labelcolor_b",
 		"actionrecorder_labelcolor_a",
 		"actionrecorder_labelcolor_rainbow",
+		"actionrecorder_reverseplayback",
     }
 
     local settings = {}
