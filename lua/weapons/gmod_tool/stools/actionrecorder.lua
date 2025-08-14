@@ -252,7 +252,7 @@ function TOOL:LeftClick(trace)
             umsg.Bool(true)
             umsg.End()
 
-            if GetConVar("ar_enable_filmgrain"):GetBool() then
+            if ply:GetInfoNum("ar_enable_filmgrain", 1) == 1 then
                 net.Start("ActionRecorder_FlashEffect")
                 net.Send(ply)
             end
@@ -264,7 +264,7 @@ function TOOL:LeftClick(trace)
             net.Start("ActionRecorder_StopLoopSound")  
             net.Send(ply)
 
-            if GetConVar("ar_enable_filmgrain"):GetBool() then
+            if ply:GetInfoNum("ar_enable_filmgrain", 1) == 1 then
                 net.Start("ActionRecorder_FlashEffect")
                 net.Send(ply)
             end
@@ -310,14 +310,15 @@ function TOOL:RightClick(trace)
         playbackType = GetConVar("actionrecorder_playbacktype"):GetString() or "absolute"
         model = GetConVar("actionrecorder_model"):GetString() or "models/dav0r/camera.mdl"
         boxid = GetConVar("actionrecorder_boxid"):GetString() or "Box"
-        key = GetConVar("actionrecorder_key"):GetInt()
+        -- Keybinding and physicsless are per-player preferences; read from the player even in global mode
+        key = ply:GetInfoNum("actionrecorder_key", 5)
         soundpath = GetConVar("actionrecorder_soundpath"):GetString()
         easing = GetConVar("actionrecorder_easing"):GetString() or "Linear"
         easing_amplitude = GetConVar("actionrecorder_easing_amplitude"):GetFloat()
         easing_frequency = GetConVar("actionrecorder_easing_frequency"):GetFloat()
         easing_invert = GetConVar("actionrecorder_easing_invert"):GetBool()
         easing_offset = GetConVar("actionrecorder_easing_offset"):GetFloat()
-        physicsless = GetConVar("ar_physicsless_teleport"):GetBool()
+        physicsless = ply:GetInfoNum("ar_physicsless_teleport", 0) == 1
         freezeonend = GetConVar("actionrecorder_freezeonend"):GetBool()
         reversePlayback = GetConVar("actionrecorder_reverseplayback"):GetBool()
         

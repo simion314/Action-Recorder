@@ -1,9 +1,13 @@
 if CLIENT then
     CreateClientConVar("ar_debug", "0", true, false, "Activare/dezactivare afișare mesaje de debug pentru Action Recorder")
+else
+    -- Server-side debug convar (off by default)
+    CreateConVar("ar_debug", "0", { FCVAR_ARCHIVE }, "Enable/disable debug logging for Action Recorder")
 end
 
 function ARLog(...)
-    if GetConVar("ar_debug"):GetInt() == 0 then return end
+    local cvar = GetConVar("ar_debug")
+    if not cvar or cvar:GetInt() == 0 then return end
 
     local args = {...}
     for i, v in ipairs(args) do
