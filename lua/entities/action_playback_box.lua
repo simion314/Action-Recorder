@@ -74,7 +74,7 @@ function ENT:SetModelPath(model)
     if SERVER then self:SetModel(model) end
 end
 
-function ENT:SetPlaybackData(data)
+function ENT:SetPlaybackData(data, entitiesConstants)
     if not data or type(data) ~= "table" or next(data) == nil then
         ARLog("SetPlaybackData Attempt to set Empty data ", data)
         return
@@ -83,6 +83,7 @@ function ENT:SetPlaybackData(data)
     --ARLog("SetPlaybackData length ", #data)
     self.PlaybackData = {}
     self.AnimationInfo = {}
+    self.EntitiesConstants = entitiesConstants or {}
     local direction = AR_PLAYBACK_DIRECTION.FORWARD
     if self.PlaybackSpeed < 0 then direction = AR_PLAYBACK_DIRECTION.REVERSE end
     for id, frames in pairs(data) do
@@ -92,6 +93,7 @@ function ENT:SetPlaybackData(data)
         end
 
         self.PlaybackData[id] = frames
+        local ent = Entity(id)
         self.AnimationInfo[id] = {
             frameCount = #frames,
             direction = direction,
@@ -99,8 +101,8 @@ function ENT:SetPlaybackData(data)
             currentFrameIndex = 1,
             initialPos = nil,
             initialAng = nil,
-            model = Entity(id):GetModel(),
-            class = Entity(id):GetClass()
+            model = IsValid(ent) and ent:GetModel() or (self.EntitiesConstants[id] and self.EntitiesConstants[id].model),
+            class = IsValid(ent) and ent:GetClass() or (self.EntitiesConstants[id] and self.EntitiesConstants[id].class)
         }
     end
 
@@ -595,9 +597,28 @@ function ENT:ProcessPlayback()
         if not IsValid(ent) then
             local model = self.AnimationInfo[entIndex].model
             local class = self.AnimationInfo[entIndex].class
+
+            if not class or not model then
+                continue
+            end
+
+            local initialPos = nil
+            for _, frame in ipairs(frames) do
+                if frame.pos then
+                    initialPos = frame.pos
+                    break
+                end
+            end
+
+            if not initialPos then
+                continue
+            end
+
             ent = ents.Create(class)
+            if not IsValid(ent) then continue end
+
             ent:SetModel(model)
-            ent:SetPos(frames[1].pos)
+            ent:SetPos(initialPos)
             ent:Spawn()
             local newEntId = ent:EntIndex()
             

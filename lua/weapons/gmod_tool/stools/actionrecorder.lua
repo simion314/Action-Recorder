@@ -109,18 +109,37 @@ local function StartPropRecording(ply, prop, boxid)
     if prop.ActionRecorder_Recording then return end
 
     ply.ActionRecordData = ply.ActionRecordData or {}
+    ply.ActionRecordEntsData = ply.ActionRecordEntsData or {}
     local id = prop:EntIndex()
     ply.ActionRecordData[id] = {}
+    ply.ActionRecordEntsData[id] = {
+        model = prop:GetModel(),
+        class = prop:GetClass()
+    }
     prop.ActionRecorder_Recording = true
     local timerName = "ActionRecorder_Prop_"..ply:EntIndex().."_"..id
 
-    local phys = prop:GetPhysicsObject()
-    if IsValid(phys) and phys:IsMoveable() == false then
-        table.insert(ply.ActionRecordData[id], {
-            frozen = true,
-            time = CurTime()
-        })
-    end
+    -- Add initial frame
+    local cur = {
+        pos = prop:GetPos(),
+        ang = prop:GetAngles(),
+        time = CurTime(),
+        material = prop:GetMaterial(),
+        color = prop:GetColor(),
+        renderfx = prop:GetRenderFX(),
+        rendermode = prop:GetRenderMode(),
+        skin = prop:GetSkin(),
+        ignited = prop:IsOnFire(),
+        collisiongroup = prop:GetCollisionGroup(),
+        bodygroups = (function()
+            local t = {}
+            for k,v in pairs(prop:GetBodyGroups() or {}) do
+                t[v.id] = prop:GetBodygroup(v.id)
+            end
+            return t
+        end)()
+    }
+    table.insert(ply.ActionRecordData[id], cur)
 
     timer.Create(timerName, 0.02, 0, function()
         if not IsValid(prop) or not IsValid(ply) or not ply.ActionRecorderEnabled or not ply.ActionRecordData then
@@ -236,6 +255,7 @@ function TOOL:LeftClick(trace)
             net.Send(ply)
 
             ply.ActionRecordData = {}
+            ply.ActionRecordEntsData = {}
 
             for _, ent in pairs(ents.GetAll()) do
                 if IsValid(ent) and not ent:IsPlayer() then
@@ -420,7 +440,7 @@ function TOOL:RightClick(trace)
 
     ent:SetPos(trace.HitPos + Vector(0, 0, 10))
     ent:Spawn()
-    ent:SetPlaybackData(ply.ActionRecordData)
+    ent:SetPlaybackData(ply.ActionRecordData, ply.ActionRecordEntsData)
     ent:SetPlaybackSettings(
         speed, loop, playbackType,
         easing, easing_amplitude, easing_frequency, easing_invert, easing_offset, physicsless, freezeonend, reversePlayback
@@ -454,6 +474,7 @@ function TOOL:RightClick(trace)
     net.Send(ply)
 
     ply.ActionRecordData = nil
+    ply.ActionRecordEntsData = nil
 
     return true
 end
