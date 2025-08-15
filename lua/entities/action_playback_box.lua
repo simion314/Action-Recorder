@@ -829,8 +829,10 @@ end
 
 if SERVER then
     numpad.Register("ActionRecorder_Playback", function(ply, ent)
-        if not IsValid(ent) then return end
-        if ent:GetNWString("OwnerName", "") ~= ply:Nick() then return end
+        if not IsValid(ply) or not IsValid(ent) then return end
+        if ent:GetClass() ~= "action_playback_box" then return end
+        if ent:GetOwner() ~= ply then return end
+
         ent:EmitSound(ent.SoundPath or "buttons/button3.wav")
         ent:StartPlayback(false)
     end)

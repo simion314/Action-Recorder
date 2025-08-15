@@ -314,6 +314,7 @@ function TOOL:RightClick(trace)
     if CLIENT then return true end
 
     local ply = self:GetOwner()
+    local isDedicated = game.IsDedicated()
     local globalMode = GetConVar("actionrecorder_globalmode"):GetBool()
 
     local speed, loop, playbackType, model, boxid, key, soundpath
@@ -322,46 +323,46 @@ function TOOL:RightClick(trace)
     local label_r, label_g, label_b, label_a, label_rainbow
     local reversePlayback
 
-    
-    -- Get settings based on global mode or player settings
-    if globalMode and ply:IsAdmin() then
+    -- Global settings are only used on a listen server (not dedicated), when global mode is on, and for the host (admin).
+    local useGlobalSettings = not isDedicated and globalMode and ply:IsAdmin()
+
+    if useGlobalSettings then
+        -- Admin on listen server in global mode uses global settings
         speed = tonumber(GetConVar("actionrecorder_playbackspeed"):GetString()) or 1
         loop = GetConVar("actionrecorder_loop"):GetInt()
         playbackType = GetConVar("actionrecorder_playbacktype"):GetString() or "absolute"
         model = GetConVar("actionrecorder_model"):GetString() or "models/dav0r/camera.mdl"
         boxid = GetConVar("actionrecorder_boxid"):GetString() or "Box"
-        -- Keybinding and physicsless are per-player preferences; read from the player even in global mode
-        key = ply:GetInfoNum("actionrecorder_key", 5)
         soundpath = GetConVar("actionrecorder_soundpath"):GetString()
         easing = GetConVar("actionrecorder_easing"):GetString() or "Linear"
         easing_amplitude = GetConVar("actionrecorder_easing_amplitude"):GetFloat()
         easing_frequency = GetConVar("actionrecorder_easing_frequency"):GetFloat()
         easing_invert = GetConVar("actionrecorder_easing_invert"):GetBool()
         easing_offset = GetConVar("actionrecorder_easing_offset"):GetFloat()
-        physicsless = ply:GetInfoNum("ar_physicsless_teleport", 0) == 1
         freezeonend = GetConVar("actionrecorder_freezeonend"):GetBool()
         reversePlayback = GetConVar("actionrecorder_reverseplayback"):GetBool()
-        
     else
+        -- Everyone on a dedicated server, or non-admins on a listen server, use their own settings
         speed = ply:GetInfoNum("actionrecorder_playbackspeed", 1)
         loop = ply:GetInfoNum("actionrecorder_loop", 0)
         playbackType = ply:GetInfo("actionrecorder_playbacktype") or "absolute"
         model = ply:GetInfo("actionrecorder_model") or "models/dav0r/camera.mdl"
         boxid = ply:GetInfo("actionrecorder_boxid") or "Box"
-        key = ply:GetInfoNum("actionrecorder_key", 5)
         soundpath = ply:GetInfo("actionrecorder_soundpath")
         easing = ply:GetInfo("actionrecorder_easing") or "None"
         easing_amplitude = ply:GetInfoNum("actionrecorder_easing_amplitude", 1)
         easing_frequency = ply:GetInfoNum("actionrecorder_easing_frequency", 1)
         easing_invert = ply:GetInfoNum("actionrecorder_easing_invert", 0) == 1
         easing_offset = ply:GetInfoNum("actionrecorder_easing_offset", 0)
-        physicsless = ply:GetInfoNum("ar_physicsless_teleport", 0) == 1
         freezeonend = ply:GetInfoNum("actionrecorder_freezeonend", 0) == 1
         reversePlayback = ply:GetInfoNum("actionrecorder_reverseplayback", 0) == 1
-        
     end
 
-    
+    -- These settings are always per-player
+    key = ply:GetInfoNum("actionrecorder_key", 5)
+    physicsless = ply:GetInfoNum("ar_physicsless_teleport", 0) == 1
+
+    -- Label color is always per-player
     local labelColor = ActionRecorder_GetLabelColorForPlayer(ply)
     label_r = labelColor.r or 255
     label_g = labelColor.g or 255
